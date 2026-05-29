@@ -38,10 +38,10 @@ def test_obtener_y_refrescar_token_con_credenciales_validas():
 
 
 @pytest.mark.django_db
-def test_endpoint_protegido_rechaza_peticion_sin_token():
+def test_api_catalogo_rechaza_peticion_sin_token():
     client = APIClient()
 
-    response = client.get("/api/protegido/")
+    response = client.get("/api/categorias/")
 
     assert response.status_code == 401
 
@@ -61,9 +61,9 @@ def test_es_panolero_permita_panolero_y_niega_alumno():
         rol=Usuario.Rol.ALUMNO,
     )
 
-    request_panolero = factory.get("/api/protegido/panolero/")
+    request_panolero = factory.post("/api/categorias/")
     request_panolero.user = panolero
-    request_alumno = factory.get("/api/protegido/panolero/")
+    request_alumno = factory.post("/api/categorias/")
     request_alumno.user = alumno
 
     assert permission.has_permission(request_panolero, view=None)
@@ -71,7 +71,7 @@ def test_es_panolero_permita_panolero_y_niega_alumno():
 
 
 @pytest.mark.django_db
-def test_endpoint_panolero_rechaza_alumno_con_403():
+def test_api_catalogo_rechaza_escritura_de_alumno_con_403():
     alumno = get_user_model().objects.create_user(
         username="alumno-endpoint",
         password="clave-segura-123",
@@ -80,7 +80,11 @@ def test_endpoint_panolero_rechaza_alumno_con_403():
     client = APIClient()
     client.force_authenticate(user=alumno)
 
-    response = client.get("/api/protegido/panolero/")
+    response = client.post(
+        "/api/categorias/",
+        {"nombre": "Herramientas"},
+        format="json",
+    )
 
     assert response.status_code == 403
 
