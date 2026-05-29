@@ -17,7 +17,9 @@ from apps.catalogo.views import (
     TipoEquipoViewSet,
     UbicacionViewSet,
 )
+from apps.compras.views import EntradaInventarioViewSet
 from apps.inventario.views import UnidadViewSet
+from apps.prestamos.views import PrestamoViewSet
 
 router = DefaultRouter()
 router.register("categorias", CategoriaViewSet, basename="categoria")
@@ -26,6 +28,10 @@ router.register("asignaturas", AsignaturaViewSet, basename="asignatura")
 router.register("ubicaciones", UbicacionViewSet, basename="ubicacion")
 router.register("tipos-equipo", TipoEquipoViewSet, basename="tipo-equipo")
 router.register("unidades", UnidadViewSet, basename="unidad")
+router.register(
+    "entradas-inventario", EntradaInventarioViewSet, basename="entrada-inventario"
+)
+router.register("prestamos", PrestamoViewSet, basename="prestamo")
 
 urlpatterns = [
     path("admin/", admin.site.urls),
