@@ -88,7 +88,10 @@ class TipoEquipo(models.Model):
     cantidad_necesaria = models.PositiveIntegerField(default=0)
     stock_granel = models.PositiveIntegerField(default=0)
     observaciones = models.TextField(blank=True)
-    history = HistoricalRecords()
+    history = HistoricalRecords(
+        verbose_name="historical tipo de equipo",
+        verbose_name_plural="historical tipos de equipo",
+    )
 
     class Meta:
         verbose_name = "tipo de equipo"
@@ -114,4 +117,4 @@ class TipoEquipo(models.Model):
 
     @property
     def brecha(self) -> int:
-        return max(self.cantidad_necesaria - self.stock_disponible, 0)
+        return max(self.cantidad_necesaria - self.stock_total, 0)
