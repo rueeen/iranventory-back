@@ -5,8 +5,9 @@ de equipamiento del Taller de Automatización y Robótica.
 
 ## Fase actual
 
-Fase 1: estructura base del proyecto, configuración por `.env`, usuario custom y
-apps de dominio iniciales.
+Fase 2: inicio del módulo de compras. Se modelan órdenes de compra e ítems
+como base para el futuro flujo de entrada de inventario, sin aceptación de
+órdenes, importación Excel ni préstamos en esta etapa.
 
 ## Desarrollo local
 
