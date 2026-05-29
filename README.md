@@ -18,7 +18,7 @@ apps de dominio iniciales.
    pip install -r requirements.txt
    ```
 
-2. Crear `.env` desde el ejemplo y ajustar `DATABASE_URL` a PostgreSQL:
+2. Crear `.env` desde el ejemplo (usa SQLite por defecto, sin configurar BD):
 
    ```bash
    cp .env.example .env

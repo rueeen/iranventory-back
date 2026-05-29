@@ -8,7 +8,7 @@ django-axes
 django-simple-history
 django-filter
 drf-spectacular
-psycopg[binary]
+# psycopg[binary]  # solo si migras a PostgreSQL
 openpyxl
 # dev
 pytest-django
