@@ -1,0 +1,16 @@
+Django>=5.0
+djangorestframework
+djangorestframework-simplejwt[crypto]
+django-cors-headers
+django-environ
+argon2-cffi
+django-axes
+django-simple-history
+django-filter
+drf-spectacular
+psycopg[binary]
+openpyxl
+# dev
+pytest-django
+model-bakery
+ruff
