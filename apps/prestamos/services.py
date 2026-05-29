@@ -1,0 +1,150 @@
+from django.core.exceptions import ValidationError
+from django.db import transaction
+from django.db.models import F
+
+from apps.catalogo.models import TipoEquipo
+from apps.inventario.models import Unidad
+
+from .models import DetallePrestamo, Prestamo
+
+
+@transaction.atomic
+def aprobar_prestamo(prestamo: Prestamo, usuario=None) -> Prestamo:
+    prestamo = Prestamo.objects.select_for_update().get(pk=prestamo.pk)
+    if prestamo.estado != Prestamo.Estado.SOLICITADA:
+        raise ValidationError("Solo los préstamos solicitados pueden aprobarse.")
+    if not prestamo.detalles.exists():
+        raise ValidationError("El préstamo debe tener al menos un detalle.")
+
+    prestamo.estado = Prestamo.Estado.APROBADA
+    prestamo.aprobado_por = usuario
+    prestamo.save(update_fields=["estado", "aprobado_por"])
+    return prestamo
+
+
+@transaction.atomic
+def rechazar_prestamo(prestamo: Prestamo, usuario=None, motivo="") -> Prestamo:
+    prestamo = Prestamo.objects.select_for_update().get(pk=prestamo.pk)
+    if prestamo.estado != Prestamo.Estado.SOLICITADA:
+        raise ValidationError("Solo los préstamos solicitados pueden rechazarse.")
+
+    prestamo.estado = Prestamo.Estado.RECHAZADA
+    prestamo.aprobado_por = usuario
+    prestamo.motivo_rechazo = motivo
+    prestamo.save(update_fields=["estado", "aprobado_por", "motivo_rechazo"])
+    return prestamo
+
+
+@transaction.atomic
+def preparar_prestamo(prestamo: Prestamo, usuario=None) -> Prestamo:
+    prestamo = Prestamo.objects.select_for_update().get(pk=prestamo.pk)
+    if prestamo.estado != Prestamo.Estado.APROBADA:
+        raise ValidationError("Solo los préstamos aprobados pueden prepararse.")
+
+    detalles = _detalles_bloqueados(prestamo)
+    for detalle in detalles:
+        detalle.full_clean()
+        if detalle.tipo_equipo.tipo_seguimiento == TipoEquipo.TipoSeguimiento.SERIE:
+            if detalle.unidad.situacion != Unidad.Situacion.DISPONIBLE:
+                raise ValidationError(
+                    f"La unidad {detalle.unidad} no está disponible para preparar."
+                )
+        elif detalle.tipo_equipo.stock_granel < detalle.cantidad:
+            raise ValidationError(
+                f"No hay stock granel suficiente para {detalle.tipo_equipo}."
+            )
+
+    prestamo.estado = Prestamo.Estado.PREPARADA
+    prestamo.preparado_por = usuario
+    prestamo.save(update_fields=["estado", "preparado_por"])
+    return prestamo
+
+
+@transaction.atomic
+def entregar_prestamo(prestamo: Prestamo, usuario=None) -> Prestamo:
+    prestamo = Prestamo.objects.select_for_update().get(pk=prestamo.pk)
+    if prestamo.estado != Prestamo.Estado.PREPARADA:
+        raise ValidationError("Solo los préstamos preparados pueden entregarse.")
+
+    detalles = _detalles_bloqueados(prestamo)
+    for detalle in detalles:
+        detalle.full_clean()
+        if detalle.tipo_equipo.tipo_seguimiento == TipoEquipo.TipoSeguimiento.SERIE:
+            unidad = Unidad.objects.select_for_update().get(pk=detalle.unidad_id)
+            if unidad.situacion != Unidad.Situacion.DISPONIBLE:
+                raise ValidationError(f"La unidad {unidad} ya no está disponible.")
+            unidad.situacion = Unidad.Situacion.PRESTADA
+            unidad.save(update_fields=["situacion"])
+        else:
+            actualizadas = (
+                TipoEquipo.objects.select_for_update()
+                .filter(
+                    pk=detalle.tipo_equipo_id,
+                    stock_granel__gte=detalle.cantidad,
+                )
+                .update(stock_granel=F("stock_granel") - detalle.cantidad)
+            )
+            if actualizadas != 1:
+                raise ValidationError(
+                    f"No hay stock granel suficiente para {detalle.tipo_equipo}."
+                )
+
+    prestamo.estado = Prestamo.Estado.ENTREGADA
+    prestamo.entregado_por = usuario
+    prestamo.save(update_fields=["estado", "entregado_por"])
+    return prestamo
+
+
+@transaction.atomic
+def iniciar_devolucion(prestamo: Prestamo) -> Prestamo:
+    prestamo = Prestamo.objects.select_for_update().get(pk=prestamo.pk)
+    if prestamo.estado != Prestamo.Estado.ENTREGADA:
+        raise ValidationError(
+            "Solo los préstamos entregados pueden entrar a devolución."
+        )
+
+    prestamo.estado = Prestamo.Estado.DEVOLUCION
+    prestamo.save(update_fields=["estado"])
+    return prestamo
+
+
+@transaction.atomic
+def cerrar_prestamo(prestamo: Prestamo, usuario=None) -> Prestamo:
+    prestamo = Prestamo.objects.select_for_update().get(pk=prestamo.pk)
+    if prestamo.estado != Prestamo.Estado.DEVOLUCION:
+        raise ValidationError("Solo los préstamos en devolución pueden cerrarse.")
+
+    detalles = _detalles_bloqueados(prestamo)
+    for detalle in detalles:
+        detalle.full_clean()
+        if detalle.cantidad_devuelta + detalle.cantidad_no_devuelta != detalle.cantidad:
+            raise ValidationError(
+                "Cada detalle debe quedar completamente devuelto "
+                "o marcado como no devuelto."
+            )
+        if detalle.tipo_equipo.tipo_seguimiento == TipoEquipo.TipoSeguimiento.SERIE:
+            unidad = Unidad.objects.select_for_update().get(pk=detalle.unidad_id)
+            if detalle.cantidad_no_devuelta:
+                unidad.situacion = Unidad.Situacion.BAJA
+            else:
+                unidad.situacion = Unidad.Situacion.DISPONIBLE
+            unidad.save(update_fields=["situacion"])
+        elif detalle.cantidad_devuelta:
+            TipoEquipo.objects.select_for_update().filter(
+                pk=detalle.tipo_equipo_id
+            ).update(
+                stock_granel=F("stock_granel") + detalle.cantidad_devuelta,
+            )
+
+    prestamo.estado = Prestamo.Estado.CERRADA
+    prestamo.cerrado_por = usuario
+    prestamo.save(update_fields=["estado", "cerrado_por"])
+    return prestamo
+
+
+def _detalles_bloqueados(prestamo: Prestamo) -> list[DetallePrestamo]:
+    return list(
+        DetallePrestamo.objects.select_related("tipo_equipo", "unidad")
+        .select_for_update()
+        .filter(prestamo=prestamo)
+    )
