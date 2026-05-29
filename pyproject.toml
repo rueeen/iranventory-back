@@ -1,0 +1,14 @@
+[tool.ruff]
+line-length = 88
+target-version = "py312"
+
+exclude = ["**/migrations/*.py"]
+
+[tool.ruff.lint]
+select = ["E", "F", "I", "UP", "B", "DJ"]
+ignore = ["DJ008"]
+
+[tool.ruff.format]
+quote-style = "double"
+indent-style = "space"
+line-ending = "auto"
