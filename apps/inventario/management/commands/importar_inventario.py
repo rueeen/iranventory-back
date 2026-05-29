@@ -95,7 +95,7 @@ def normalize_inventory_codes(value: Any) -> tuple[list[str], bool]:
     remaining_text = CODIGO_ACTIVO_RE.sub("", text)
     requires_review = bool(codes and re.sub(r"\s+", "", remaining_text))
 
-    for raw_code in CODIGO_SIN_GUION_RE.findall(text):
+    for raw_code in CODIGO_SIN_GUION_RE.findall(remaining_text):
         normalized_code = f"{raw_code[:2]}-{raw_code[2:]}"
         if normalized_code not in codes:
             codes.append(normalized_code)
@@ -108,26 +108,48 @@ def normalize_inventory_codes(value: Any) -> tuple[list[str], bool]:
 
 
 def parse_subject_codes(*values: Any) -> set[str]:
-    text = " ".join(clean_text(value).upper() for value in values if clean_text(value))
+    text = " ".join(clean_text(value).upper()
+                    for value in values if clean_text(value))
     return set(CODIGO_ASIGNATURA_RE.findall(text))
 
 
-def build_column_map(rows: list[tuple[Any, ...]]) -> dict[str, int]:
-    normalized_aliases = {
-        field: {normalize_header(alias) for alias in aliases}
-        for field, aliases in HEADER_ALIASES.items()
-    }
+def match_header_field(header: str) -> str | None:
+    """Mapea un encabezado normalizado a un campo, por subcadenas (orden importa)."""
+    if not header:
+        return None
+    if "carrera" in header:
+        return "carreras"
+    if "asignatura" in header:
+        return "asignaturas"
+    if "codigo" in header and "inventario" in header:
+        return "codigo"
+    if "especificacion" in header or "detalle" in header:
+        return "especificacion"
+    if header.startswith("cantidad total") or header == "cantidad" or header == "total":
+        return "cantidad"
+    if header == "equipo" or "nombre" in header:
+        return "nombre"
+    return None
+
+
+def find_header_row(rows: list[tuple[Any, ...]]) -> int:
+    """Primera fila que contenga el encabezado real (col código + equipo)."""
+    for index, row in enumerate(rows[:15]):
+        headers = {normalize_header(v) for v in row if v is not None}
+        if any("codigo" in h and "inventario" in h for h in headers) and any(
+            h == "equipo" or "nombre" in h for h in headers
+        ):
+            return index
+    return 0
+
+
+def build_column_map(header_rows: list[tuple[Any, ...]]) -> dict[str, int]:
     column_map: dict[str, int] = {}
-
-    for row in rows[:3]:
+    for row in header_rows:
         for index, value in enumerate(row):
-            header = normalize_header(value)
-            if not header:
-                continue
-            for field_name, aliases in normalized_aliases.items():
-                if field_name not in column_map and header in aliases:
-                    column_map[field_name] = index
-
+            field_name = match_header_field(normalize_header(value))
+            if field_name and field_name not in column_map:
+                column_map[field_name] = index
     return {**FALLBACK_COLUMNS, **column_map}
 
 
@@ -161,10 +183,11 @@ class Command(BaseCommand):
         workbook = load_workbook(path, data_only=True, read_only=True)
         sheet = workbook.active
         rows = list(sheet.iter_rows(values_only=True))
-        column_map = build_column_map(rows)
+        header_idx = find_header_row(rows)
+        column_map = build_column_map(rows[header_idx: header_idx + 2])
 
         with transaction.atomic():
-            summary = self.import_rows(rows[3:], column_map)
+            summary = self.import_rows(rows[header_idx + 1:], column_map)
             if dry_run:
                 transaction.set_rollback(True)
 
@@ -190,21 +213,25 @@ class Command(BaseCommand):
         summary = ImportSummary()
         seen_codes: set[str] = set()
 
-        for row_number, row in enumerate(rows, start=4):
+        for row_number, row in enumerate(rows, start=2):
             nombre = clean_text(get_cell(row, column_map, "nombre"))
             if not nombre:
                 continue
 
             codigo_cell = get_cell(row, column_map, "codigo")
-            cantidad_total = parse_positive_int(get_cell(row, column_map, "cantidad"))
-            especificacion = clean_text(get_cell(row, column_map, "especificacion"))
-            codigos, row_requires_review = normalize_inventory_codes(codigo_cell)
+            cantidad_total = parse_positive_int(
+                get_cell(row, column_map, "cantidad"))
+            especificacion = clean_text(
+                get_cell(row, column_map, "especificacion"))
+            codigos, row_requires_review = normalize_inventory_codes(
+                codigo_cell)
             cantidad_sin_codigo = max(cantidad_total - len(codigos), 0)
             if row_requires_review and not codigos and cantidad_sin_codigo == 0:
                 cantidad_sin_codigo = 1
             row_requires_review = row_requires_review or cantidad_sin_codigo > 0
 
-            tipo_equipo, tipo_created = TipoEquipo.objects.get_or_create(nombre=nombre)
+            tipo_equipo, tipo_created = TipoEquipo.objects.get_or_create(
+                nombre=nombre)
             if tipo_created:
                 summary.tipos_creados += 1
 
@@ -268,7 +295,8 @@ class Command(BaseCommand):
             tipo_equipo.especificacion = especificacion
             changed = True
         if changed:
-            tipo_equipo.save(update_fields=["cantidad_necesaria", "especificacion"])
+            tipo_equipo.save(
+                update_fields=["cantidad_necesaria", "especificacion"])
         return changed
 
     def link_subjects(self, tipo_equipo: TipoEquipo, subject_codes: set[str]) -> bool:
