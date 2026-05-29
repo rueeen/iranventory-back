@@ -40,7 +40,10 @@ class Unidad(models.Model):
         related_name="unidades",
     )
     requiere_revision = models.BooleanField(default=False)
-    history = HistoricalRecords()
+    history = HistoricalRecords(
+        verbose_name="historical unidad",
+        verbose_name_plural="historical unidades",
+    )
 
     class Meta:
         verbose_name = "unidad"

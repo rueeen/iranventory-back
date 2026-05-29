@@ -36,4 +36,5 @@ apps de dominio iniciales.
    ```bash
    pytest
    ruff check .
+   python manage.py makemigrations --check --dry-run
    ```

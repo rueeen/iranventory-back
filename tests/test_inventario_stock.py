@@ -22,3 +22,23 @@ def test_stock_tipo_equipo_por_serie_excluye_unidades_de_baja():
     assert tipo_equipo.stock_total == 2
     assert tipo_equipo.stock_disponible == 2
     assert tipo_equipo.brecha == 2
+
+
+@pytest.mark.django_db
+def test_brecha_usa_stock_total_y_no_sube_por_unidades_prestadas():
+    tipo_equipo = TipoEquipo.objects.create(
+        nombre="Multímetro",
+        tipo_seguimiento=TipoEquipo.TipoSeguimiento.SERIE,
+        cantidad_necesaria=4,
+    )
+    Unidad.objects.create(tipo_equipo=tipo_equipo, codigo_activo="MUL-001")
+    Unidad.objects.create(tipo_equipo=tipo_equipo, codigo_activo="MUL-002")
+    Unidad.objects.create(
+        tipo_equipo=tipo_equipo,
+        codigo_activo="MUL-003",
+        situacion=Unidad.Situacion.PRESTADA,
+    )
+
+    assert tipo_equipo.stock_total == 3
+    assert tipo_equipo.stock_disponible == 2
+    assert tipo_equipo.brecha == 1
