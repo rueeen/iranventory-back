@@ -108,3 +108,10 @@ class ItemOrdenCompraSerializer(serializers.ModelSerializer):
             "observaciones",
         ]
         read_only_fields = ["orden_compra"]
+
+
+class RechazarOrdenCompraSerializer(serializers.Serializer):
+    observaciones = serializers.CharField(
+        allow_blank=True,
+        required=False,
+    )

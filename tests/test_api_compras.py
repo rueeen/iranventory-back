@@ -5,6 +5,7 @@ from rest_framework.test import APIClient
 from apps.catalogo.models import TipoEquipo
 from apps.compras.models import OrdenCompra
 from apps.cuentas.models import Usuario
+from apps.inventario.models import Unidad
 
 
 @pytest.fixture
@@ -79,7 +80,7 @@ def test_panolero_envia_orden_compra_a_revision(api_client, panolero_compras):
     api_client.force_authenticate(user=panolero_compras)
 
     response = api_client.post(
-        f"/api/ordenes-compra/{orden_compra.id}/enviar-a-revision/"
+        f"/api/ordenes-compra/{orden_compra.id}/enviar_revision/"
     )
 
     assert response.status_code == 200
@@ -107,3 +108,150 @@ def test_filtro_items_orden_compra_por_tipo_equipo(api_client, alumno_compras):
 
     assert response.status_code == 200
     assert [item["id"] for item in response.data["results"]] == [item_filtrado.id]
+
+
+@pytest.mark.django_db
+def test_aceptar_orden_compra_serie_crea_unidades(api_client, panolero_compras):
+    tipo_equipo = TipoEquipo.objects.create(
+        nombre="Osciloscopio",
+        tipo_seguimiento=TipoEquipo.TipoSeguimiento.SERIE,
+    )
+    orden_compra = OrdenCompra.objects.create(
+        numero="OC-SERIE",
+        proveedor="Proveedor",
+        estado=OrdenCompra.Estado.EN_REVISION,
+    )
+    orden_compra.items.create(
+        tipo_equipo=tipo_equipo,
+        cantidad=2,
+        codigos_activo="OSC-001\nOSC-002",
+    )
+    api_client.force_authenticate(user=panolero_compras)
+
+    response = api_client.post(f"/api/ordenes-compra/{orden_compra.id}/aceptar/")
+
+    assert response.status_code == 200
+    assert response.data["estado"] == OrdenCompra.Estado.ACEPTADA
+    assert response.data["revisado_por"] == panolero_compras.id
+    assert list(
+        Unidad.objects.filter(tipo_equipo=tipo_equipo).values_list(
+            "codigo_activo",
+            "estado",
+            "situacion",
+        )
+    ) == [
+        ("OSC-001", Unidad.Estado.BUENO, Unidad.Situacion.DISPONIBLE),
+        ("OSC-002", Unidad.Estado.BUENO, Unidad.Situacion.DISPONIBLE),
+    ]
+
+
+@pytest.mark.django_db
+def test_aceptar_orden_compra_granel_suma_stock(api_client, panolero_compras):
+    tipo_equipo = TipoEquipo.objects.create(
+        nombre="Tornillo M3",
+        tipo_seguimiento=TipoEquipo.TipoSeguimiento.GRANEL,
+        stock_granel=4,
+    )
+    orden_compra = OrdenCompra.objects.create(
+        numero="OC-GRANEL",
+        proveedor="Proveedor",
+        estado=OrdenCompra.Estado.EN_REVISION,
+    )
+    orden_compra.items.create(tipo_equipo=tipo_equipo, cantidad=6)
+    api_client.force_authenticate(user=panolero_compras)
+
+    response = api_client.post(f"/api/ordenes-compra/{orden_compra.id}/aceptar/")
+
+    tipo_equipo.refresh_from_db()
+    assert response.status_code == 200
+    assert response.data["estado"] == OrdenCompra.Estado.ACEPTADA
+    assert tipo_equipo.stock_granel == 10
+    assert Unidad.objects.count() == 0
+
+
+@pytest.mark.django_db
+def test_aceptar_orden_compra_con_codigo_existente_no_modifica_nada(
+    api_client,
+    panolero_compras,
+):
+    tipo_equipo = TipoEquipo.objects.create(
+        nombre="Multímetro",
+        tipo_seguimiento=TipoEquipo.TipoSeguimiento.SERIE,
+    )
+    Unidad.objects.create(tipo_equipo=tipo_equipo, codigo_activo="MUL-001")
+    orden_compra = OrdenCompra.objects.create(
+        numero="OC-DUP",
+        proveedor="Proveedor",
+        estado=OrdenCompra.Estado.EN_REVISION,
+    )
+    orden_compra.items.create(
+        tipo_equipo=tipo_equipo,
+        cantidad=2,
+        codigos_activo="MUL-001\nMUL-002",
+    )
+    api_client.force_authenticate(user=panolero_compras)
+
+    response = api_client.post(f"/api/ordenes-compra/{orden_compra.id}/aceptar/")
+
+    orden_compra.refresh_from_db()
+    assert response.status_code == 400
+    assert orden_compra.estado == OrdenCompra.Estado.EN_REVISION
+    assert set(Unidad.objects.values_list("codigo_activo", flat=True)) == {"MUL-001"}
+
+
+@pytest.mark.django_db
+def test_aceptar_orden_compra_invalida_no_modifica_stock_granel(
+    api_client,
+    panolero_compras,
+):
+    tipo_granel = TipoEquipo.objects.create(
+        nombre="Amarras",
+        tipo_seguimiento=TipoEquipo.TipoSeguimiento.GRANEL,
+        stock_granel=5,
+    )
+    tipo_serie = TipoEquipo.objects.create(
+        nombre="Fuente DC",
+        tipo_seguimiento=TipoEquipo.TipoSeguimiento.SERIE,
+    )
+    orden_compra = OrdenCompra.objects.create(
+        numero="OC-ROLLBACK",
+        proveedor="Proveedor",
+        estado=OrdenCompra.Estado.EN_REVISION,
+    )
+    orden_compra.items.create(tipo_equipo=tipo_granel, cantidad=4)
+    orden_compra.items.create(
+        tipo_equipo=tipo_serie,
+        cantidad=2,
+        codigos_activo="FDC-001",
+    )
+    api_client.force_authenticate(user=panolero_compras)
+
+    response = api_client.post(f"/api/ordenes-compra/{orden_compra.id}/aceptar/")
+
+    tipo_granel.refresh_from_db()
+    orden_compra.refresh_from_db()
+    assert response.status_code == 400
+    assert tipo_granel.stock_granel == 5
+    assert orden_compra.estado == OrdenCompra.Estado.EN_REVISION
+    assert Unidad.objects.count() == 0
+
+
+@pytest.mark.django_db
+def test_rechazar_orden_compra_registra_observacion(api_client, panolero_compras):
+    orden_compra = OrdenCompra.objects.create(
+        numero="OC-RECH",
+        proveedor="Proveedor",
+        estado=OrdenCompra.Estado.EN_REVISION,
+    )
+    api_client.force_authenticate(user=panolero_compras)
+
+    response = api_client.post(
+        f"/api/ordenes-compra/{orden_compra.id}/rechazar/",
+        {"observaciones": "Proveedor no cumple especificación."},
+        format="json",
+    )
+
+    assert response.status_code == 200
+    assert response.data["estado"] == OrdenCompra.Estado.RECHAZADA
+    assert response.data["observaciones"] == "Proveedor no cumple especificación."
+    assert response.data["revisado_por"] == panolero_compras.id
