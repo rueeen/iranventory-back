@@ -1,117 +1,79 @@
-from django.db import transaction
 from rest_framework import serializers
 
-from apps.catalogo.models import TipoEquipo
-from apps.catalogo.serializers import TipoEquipoSerializer
+from apps.catalogo.models import TipoEquipo, Ubicacion
+from apps.catalogo.serializers import TipoEquipoSerializer, UbicacionSerializer
 
-from .models import ItemOrdenCompra, OrdenCompra
+from .models import EntradaInventario, LineaEntradaInventario
 
 
-class ItemOrdenCompraAnidadoSerializer(serializers.ModelSerializer):
+class LineaEntradaInventarioSerializer(serializers.ModelSerializer):
     tipo_equipo = TipoEquipoSerializer(read_only=True)
     tipo_equipo_id = serializers.PrimaryKeyRelatedField(
         queryset=TipoEquipo.objects.all(),
         source="tipo_equipo",
         write_only=True,
     )
+    ubicacion = UbicacionSerializer(read_only=True)
+    ubicacion_id = serializers.PrimaryKeyRelatedField(
+        allow_null=True,
+        queryset=Ubicacion.objects.all(),
+        required=False,
+        source="ubicacion",
+        write_only=True,
+    )
 
     class Meta:
-        model = ItemOrdenCompra
+        model = LineaEntradaInventario
         fields = [
             "id",
             "tipo_equipo",
             "tipo_equipo_id",
             "cantidad",
             "codigos_activo",
+            "ubicacion",
+            "ubicacion_id",
             "observaciones",
         ]
 
 
-class OrdenCompraSerializer(serializers.ModelSerializer):
-    items = ItemOrdenCompraAnidadoSerializer(many=True, required=False)
+class EntradaInventarioSerializer(serializers.ModelSerializer):
+    lineas = LineaEntradaInventarioSerializer(many=True, required=False)
 
     class Meta:
-        model = OrdenCompra
+        model = EntradaInventario
         fields = [
             "id",
-            "numero",
+            "numero_documento",
             "proveedor",
             "fecha_documento",
             "estado",
             "observaciones",
-            "creado_por",
-            "revisado_por",
+            "revisada_por",
             "fecha_revision",
-            "created_at",
-            "updated_at",
-            "items",
+            "aceptada_por",
+            "fecha_aceptacion",
+            "lineas",
         ]
         read_only_fields = [
             "estado",
-            "creado_por",
-            "revisado_por",
+            "revisada_por",
             "fecha_revision",
-            "created_at",
-            "updated_at",
+            "aceptada_por",
+            "fecha_aceptacion",
         ]
 
-    @transaction.atomic
     def create(self, validated_data):
-        items_data = validated_data.pop("items", [])
-        orden_compra = OrdenCompra.objects.create(
-            creado_por=self.context["request"].user,
-            **validated_data,
-        )
-        self._guardar_items(orden_compra, items_data)
-        return orden_compra
+        lineas_data = validated_data.pop("lineas", [])
+        entrada = EntradaInventario.objects.create(**validated_data)
+        for linea_data in lineas_data:
+            LineaEntradaInventario.objects.create(entrada=entrada, **linea_data)
+        return entrada
 
-    @transaction.atomic
     def update(self, instance, validated_data):
-        items_data = validated_data.pop("items", None)
-        orden_compra = super().update(instance, validated_data)
-        if items_data is not None:
-            orden_compra.items.all().delete()
-            self._guardar_items(orden_compra, items_data)
-        return orden_compra
-
-    def _guardar_items(self, orden_compra, items_data) -> None:
-        for item_data in items_data:
-            ItemOrdenCompra.objects.create(
-                orden_compra=orden_compra,
-                **item_data,
-            )
-
-
-class ItemOrdenCompraSerializer(serializers.ModelSerializer):
-    orden_compra_id = serializers.PrimaryKeyRelatedField(
-        queryset=OrdenCompra.objects.all(),
-        source="orden_compra",
-        write_only=True,
-    )
-    tipo_equipo = TipoEquipoSerializer(read_only=True)
-    tipo_equipo_id = serializers.PrimaryKeyRelatedField(
-        queryset=TipoEquipo.objects.all(),
-        source="tipo_equipo",
-        write_only=True,
-    )
-
-    class Meta:
-        model = ItemOrdenCompra
-        fields = [
-            "id",
-            "orden_compra",
-            "orden_compra_id",
-            "tipo_equipo",
-            "tipo_equipo_id",
-            "cantidad",
-            "codigos_activo",
-            "observaciones",
-        ]
-        read_only_fields = ["orden_compra"]
-
-
-class RechazarOrdenCompraSerializer(serializers.Serializer):
-    observaciones = serializers.CharField(
-        allow_blank=True,
-        required=False,
-    )
+        lineas_data = validated_data.pop("lineas", None)
+        instance = super().update(instance, validated_data)
+        if lineas_data is not None:
+            instance.lineas.all().delete()
+            for linea_data in lineas_data:
+                LineaEntradaInventario.objects.create(entrada=instance, **linea_data)
+        return instance

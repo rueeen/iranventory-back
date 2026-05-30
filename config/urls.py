@@ -19,6 +19,7 @@ from apps.catalogo.views import (
 )
 from apps.compras.views import ItemOrdenCompraViewSet, OrdenCompraViewSet
 from apps.inventario.views import UnidadViewSet
+from apps.prestamos.views import PrestamoViewSet
 
 router = DefaultRouter()
 router.register("categorias", CategoriaViewSet, basename="categoria")
