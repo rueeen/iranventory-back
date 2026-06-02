@@ -1,6 +1,6 @@
 from django.core.exceptions import ValidationError
 from django.db import transaction
-from django.db.models import F
+from django.db.models import F, Max
 from django.utils import timezone
 
 from apps.catalogo.models import TipoEquipo
@@ -8,6 +8,46 @@ from apps.inventario.models import Unidad
 
 from .models import ItemOrdenCompra, OrdenCompra
 
+
+# ──────────────────────────── número correlativo ──────────────────────────────
+
+def _siguiente_numero_oc(year: int) -> str:
+    """
+    Genera OC-YYYY-NNNN de forma thread-safe.
+    Debe llamarse dentro de una transacción con select_for_update activo
+    sobre el objeto que se está creando/actualizando.
+    """
+    prefijo = f"OC-{year}-"
+    ultimo = (
+        OrdenCompra.objects.filter(numero__startswith=prefijo)
+        .aggregate(Max("numero"))["numero__max"]
+    )
+    if ultimo:
+        try:
+            n = int(ultimo.rsplit("-", 1)[-1]) + 1
+        except ValueError:
+            n = 1
+    else:
+        n = 1
+    return f"{prefijo}{n:04d}"
+
+
+@transaction.atomic
+def generar_numero_oc() -> str:
+    """
+    Reserva el siguiente número correlativo para el año actual.
+    Usa select_for_update sobre el último registro del año para evitar
+    condiciones de carrera en SQLite (compatible) y PostgreSQL.
+    """
+    year = timezone.now().year
+    prefijo = f"OC-{year}-"
+    # Bloquea la fila con el número más alto del año para serializar
+    # accesos concurrentes. En SQLite el bloqueo es a nivel de tabla.
+    OrdenCompra.objects.filter(numero__startswith=prefijo).select_for_update()
+    return _siguiente_numero_oc(year)
+
+
+# ──────────────────────────── transiciones de estado ─────────────────────────
 
 @transaction.atomic
 def enviar_revision(orden_compra: OrdenCompra, usuario=None) -> OrdenCompra:
@@ -106,10 +146,6 @@ def _items_bloqueados(orden_compra: OrdenCompra) -> list[ItemOrdenCompra]:
 def _validar_items_para_aceptacion(
     items: list[ItemOrdenCompra],
 ) -> dict[int, list[str]]:
-    """
-    Valida cada ítem SERIE que tenga cantidad_recibida > 0 y devuelve
-    {item.pk: [codigos]} listos para crear Unidades.
-    """
     codigos_por_item: dict[int, list[str]] = {}
     codigos_de_la_orden: set[str] = set()
     codigos_repetidos_entre_items: set[str] = set()

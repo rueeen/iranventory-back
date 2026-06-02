@@ -4,6 +4,7 @@ from apps.catalogo.models import TipoEquipo, Ubicacion
 from apps.catalogo.serializers import TipoEquipoSerializer, UbicacionSerializer
 
 from .models import ItemOrdenCompra, OrdenCompra
+from .services import generar_numero_oc
 
 
 class ItemOrdenCompraSerializer(serializers.ModelSerializer):
@@ -63,6 +64,8 @@ class OrdenCompraSerializer(serializers.ModelSerializer):
     items = ItemOrdenCompraSerializer(many=True, required=False)
     creado_por = serializers.PrimaryKeyRelatedField(read_only=True)
     revisado_por = serializers.PrimaryKeyRelatedField(read_only=True)
+    es_editable = serializers.BooleanField(read_only=True)
+    tiene_items_pendientes = serializers.BooleanField(read_only=True)
 
     class Meta:
         model = OrdenCompra
@@ -79,21 +82,28 @@ class OrdenCompraSerializer(serializers.ModelSerializer):
             "fecha_revision",
             "created_at",
             "updated_at",
+            "es_editable",
+            "tiene_items_pendientes",
             "items",
         ]
         read_only_fields = [
+            "numero",
             "estado",
             "creado_por",
             "revisado_por",
             "fecha_revision",
             "created_at",
             "updated_at",
+            "es_editable",
+            "tiene_items_pendientes",
         ]
 
     def create(self, validated_data):
         items_data = validated_data.pop("items", [])
         request = self.context.get("request")
+        numero = generar_numero_oc()
         orden = OrdenCompra.objects.create(
+            numero=numero,
             creado_por=request.user if request else None,
             **validated_data,
         )

@@ -161,17 +161,17 @@ def test_aceptar_serie_no_recibida_no_crea_unidades(oc, tipo_serie):
 
 @pytest.mark.django_db
 def test_aceptar_serie_codigos_insuficientes_falla(oc, tipo_serie):
+    # La validación ahora ocurre en clean() al guardar el ítem,
+    # no al aceptar — se detecta antes de llegar al service.
     from django.core.exceptions import ValidationError
-    ItemOrdenCompra.objects.create(
-        orden_compra=oc,
-        tipo_equipo=tipo_serie,
-        cantidad_solicitada=3,
-        cantidad_recibida=3,
-        codigos_activo=["OSC-001", "OSC-002"],  # falta uno
-    )
-    enviar_revision(oc)
-    with pytest.raises(ValidationError, match="exactamente 3"):
-        aceptar_orden_compra(oc)
+    with pytest.raises(ValidationError, match="Deben coincidir"):
+        ItemOrdenCompra.objects.create(
+            orden_compra=oc,
+            tipo_equipo=tipo_serie,
+            cantidad_solicitada=3,
+            cantidad_recibida=3,
+            codigos_activo=["OSC-001", "OSC-002"],  # falta uno
+        )
 
 
 @pytest.mark.django_db

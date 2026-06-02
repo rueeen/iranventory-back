@@ -14,6 +14,8 @@ class OrdenCompra(models.Model):
         ACEPTADA = "ACEPTADA", "Aceptada"
         RECHAZADA = "RECHAZADA", "Rechazada"
 
+    ESTADOS_EDITABLES = {Estado.BORRADOR}
+
     numero = models.CharField(max_length=80, unique=True)
     proveedor = models.CharField(max_length=160, blank=True)
     numero_documento = models.CharField(max_length=80, blank=True)
@@ -55,12 +57,8 @@ class OrdenCompra(models.Model):
         return self.numero
 
     @property
-    def puede_enviarse(self) -> bool:
-        return self.estado == self.Estado.BORRADOR
-
-    @property
-    def puede_resolverse(self) -> bool:
-        return self.estado == self.Estado.EN_REVISION
+    def es_editable(self) -> bool:
+        return self.estado in self.ESTADOS_EDITABLES
 
     @property
     def tiene_items_pendientes(self) -> bool:
@@ -75,7 +73,7 @@ class ItemOrdenCompra(models.Model):
     Ítem solicitado dentro de una OC.
 
     - cantidad_solicitada: lo que se pidió al proveedor.
-    - cantidad_recibida:   lo que llegó físicamente (0 a cantidad_solicitada).
+    - cantidad_recibida:   lo que llegó físicamente (0..cantidad_solicitada).
     - codigos_activo:      lista de códigos de activo, solo para equipos SERIE;
                            len debe coincidir con cantidad_recibida al aceptar.
     """
@@ -120,10 +118,12 @@ class ItemOrdenCompra(models.Model):
 
     def clean(self):
         super().clean()
+
         if self.cantidad_solicitada is not None and self.cantidad_solicitada < 1:
             raise ValidationError(
                 {"cantidad_solicitada": "La cantidad solicitada debe ser mayor a cero."}
             )
+
         if (
             self.cantidad_recibida is not None
             and self.cantidad_solicitada is not None
@@ -136,10 +136,32 @@ class ItemOrdenCompra(models.Model):
                     )
                 }
             )
+
         if not isinstance(self.codigos_activo, list):
             raise ValidationError(
                 {"codigos_activo": "Los códigos de activo deben enviarse como lista."}
             )
+
+        # Validación anticipada de consistencia SERIE: si ya hay cantidad_recibida
+        # y códigos, la cantidad debe coincidir. Permite guardar en borrador con
+        # cantidad_recibida=0 y lista vacía sin error.
+        es_serie = (
+            self.tipo_equipo_id
+            and hasattr(self, "tipo_equipo")
+            and self.tipo_equipo.tipo_seguimiento == TipoEquipo.TipoSeguimiento.SERIE
+        )
+        if es_serie and self.cantidad_recibida > 0 and self.codigos_activo:
+            codigos_limpios = [c for c in self.codigos_activo if c]
+            if len(codigos_limpios) != self.cantidad_recibida:
+                raise ValidationError(
+                    {
+                        "codigos_activo": (
+                            f"Se indicaron {self.cantidad_recibida} unidades recibidas "
+                            f"pero hay {len(codigos_limpios)} código(s) de activo. "
+                            "Deben coincidir."
+                        )
+                    }
+                )
 
     @property
     def pendiente(self) -> int:
