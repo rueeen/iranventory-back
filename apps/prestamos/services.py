@@ -30,7 +30,7 @@ def rechazar_prestamo(prestamo: Prestamo, usuario=None, motivo="") -> Prestamo:
 
     prestamo.estado = Prestamo.Estado.RECHAZADA
     prestamo.aprobado_por = usuario
-    prestamo.motivo_rechazo = motivo
+    prestamo.motivo_rechazo = motivo or ""
     prestamo.save(update_fields=["estado", "aprobado_por", "motivo_rechazo"])
     return prestamo
 
@@ -42,19 +42,28 @@ def preparar_prestamo(prestamo: Prestamo, usuario=None) -> Prestamo:
         raise ValidationError("Solo los préstamos aprobados pueden prepararse.")
 
     detalles = _detalles_bloqueados(prestamo)
+    if not detalles:
+        raise ValidationError("El préstamo debe tener al menos un detalle.")
+
     for detalle in detalles:
         detalle.full_clean()
         if detalle.tipo_equipo.tipo_seguimiento == TipoEquipo.TipoSeguimiento.SERIE:
+            unidad = Unidad.objects.select_for_update().get(pk=detalle.unidad_id)
             if (
-                detalle.unidad.situacion != Unidad.Situacion.DISPONIBLE
-                or detalle.unidad.estado != Unidad.Estado.BUENO
+                unidad.situacion != Unidad.Situacion.DISPONIBLE
+                or unidad.estado != Unidad.Estado.BUENO
             ):
                 raise ValidationError(
-                    f"La unidad {detalle.unidad} no está disponible para preparar."
+                    "No se puede preparar el préstamo porque la unidad "
+                    f"{unidad} de {detalle.tipo_equipo} no está disponible "
+                    f"(situación: {unidad.get_situacion_display()}, "
+                    f"estado: {unidad.get_estado_display()})."
                 )
         elif detalle.tipo_equipo.stock_granel < detalle.cantidad:
             raise ValidationError(
-                f"No hay stock granel suficiente para {detalle.tipo_equipo}."
+                "No se puede preparar el préstamo porque no hay stock suficiente "
+                f"para {detalle.tipo_equipo}: solicitado {detalle.cantidad}, "
+                f"disponible {detalle.tipo_equipo.stock_granel}."
             )
 
     prestamo.estado = Prestamo.Estado.PREPARADA

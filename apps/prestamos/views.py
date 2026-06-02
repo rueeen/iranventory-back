@@ -55,7 +55,7 @@ class PrestamoViewSet(viewsets.ModelViewSet):
             rechazar_prestamo,
             self.get_object(),
             request.user,
-            request.data.get("motivo", ""),
+            request.data.get("motivo", request.data.get("motivo_rechazo", "")),
         )
         return response.Response(
             self.get_serializer(prestamo).data, status=status.HTTP_200_OK
