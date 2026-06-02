@@ -13,6 +13,7 @@ from apps.prestamos.services import (
     entregar_prestamo,
     iniciar_devolucion,
     preparar_prestamo,
+    rechazar_prestamo,
 )
 
 
@@ -37,6 +38,126 @@ def panolero():
 @pytest.fixture
 def api_client():
     return APIClient()
+
+
+@pytest.mark.django_db
+def test_aprobar_prestamo_rechaza_solicitud_sin_detalles(alumno):
+    prestamo = Prestamo.objects.create(solicitante=alumno)
+
+    with pytest.raises(ValidationError) as exc_info:
+        aprobar_prestamo(prestamo)
+
+    prestamo.refresh_from_db()
+    assert "al menos un detalle" in str(exc_info.value)
+    assert prestamo.estado == Prestamo.Estado.SOLICITADA
+
+
+@pytest.mark.django_db
+def test_preparar_prestamo_granel_informa_tipo_cantidad_y_disponible(alumno):
+    tipo_equipo = TipoEquipo.objects.create(
+        nombre="Baterías AA",
+        tipo_seguimiento=TipoEquipo.TipoSeguimiento.GRANEL,
+        stock_granel=1,
+    )
+    prestamo = Prestamo.objects.create(solicitante=alumno)
+    DetallePrestamo.objects.create(
+        prestamo=prestamo,
+        tipo_equipo=tipo_equipo,
+        cantidad=3,
+    )
+    aprobar_prestamo(prestamo)
+
+    with pytest.raises(ValidationError) as exc_info:
+        preparar_prestamo(prestamo)
+
+    prestamo.refresh_from_db()
+    tipo_equipo.refresh_from_db()
+    mensaje = str(exc_info.value)
+    assert "Baterías AA" in mensaje
+    assert "solicitado 3" in mensaje
+    assert "disponible 1" in mensaje
+    assert prestamo.estado == Prestamo.Estado.APROBADA
+    assert tipo_equipo.stock_granel == 1
+
+
+@pytest.mark.django_db
+def test_preparar_prestamo_serie_informa_unidad_y_tipo_no_disponible(alumno):
+    tipo_equipo = TipoEquipo.objects.create(nombre="Osciloscopio")
+    unidad = Unidad.objects.create(
+        tipo_equipo=tipo_equipo,
+        codigo_activo="OSC-001",
+        situacion=Unidad.Situacion.REPARACION,
+    )
+    prestamo = Prestamo.objects.create(solicitante=alumno)
+    DetallePrestamo.objects.create(
+        prestamo=prestamo,
+        tipo_equipo=tipo_equipo,
+        unidad=unidad,
+    )
+    aprobar_prestamo(prestamo)
+
+    with pytest.raises(ValidationError) as exc_info:
+        preparar_prestamo(prestamo)
+
+    prestamo.refresh_from_db()
+    unidad.refresh_from_db()
+    mensaje = str(exc_info.value)
+    assert "OSC-001" in mensaje
+    assert "Osciloscopio" in mensaje
+    assert "no está disponible" in mensaje
+    assert prestamo.estado == Prestamo.Estado.APROBADA
+    assert unidad.situacion == Unidad.Situacion.REPARACION
+
+
+@pytest.mark.django_db
+def test_rechazar_prestamo_guarda_motivo_sin_afectar_stock_ni_unidades(
+    alumno, panolero
+):
+    tipo_granel = TipoEquipo.objects.create(
+        nombre="Jumpers",
+        tipo_seguimiento=TipoEquipo.TipoSeguimiento.GRANEL,
+        stock_granel=5,
+    )
+    tipo_serie = TipoEquipo.objects.create(nombre="Fuente DC")
+    unidad = Unidad.objects.create(tipo_equipo=tipo_serie, codigo_activo="FDC-001")
+    prestamo = Prestamo.objects.create(solicitante=alumno)
+    DetallePrestamo.objects.create(
+        prestamo=prestamo,
+        tipo_equipo=tipo_granel,
+        cantidad=4,
+    )
+    DetallePrestamo.objects.create(
+        prestamo=prestamo,
+        tipo_equipo=tipo_serie,
+        unidad=unidad,
+    )
+
+    rechazar_prestamo(prestamo, panolero, "Sin stock suficiente")
+
+    prestamo.refresh_from_db()
+    tipo_granel.refresh_from_db()
+    unidad.refresh_from_db()
+    assert prestamo.estado == Prestamo.Estado.RECHAZADA
+    assert prestamo.motivo_rechazo == "Sin stock suficiente"
+    assert tipo_granel.stock_granel == 5
+    assert unidad.situacion == Unidad.Situacion.DISPONIBLE
+
+
+@pytest.mark.django_db
+def test_api_rechazar_acepta_motivo_rechazo(api_client, alumno, panolero):
+    prestamo = Prestamo.objects.create(solicitante=alumno)
+    api_client.force_authenticate(user=panolero)
+
+    response = api_client.post(
+        f"/api/prestamos/{prestamo.id}/rechazar/",
+        {"motivo_rechazo": "Solicitud duplicada"},
+        format="json",
+    )
+
+    prestamo.refresh_from_db()
+    assert response.status_code == 200
+    assert prestamo.estado == Prestamo.Estado.RECHAZADA
+    assert prestamo.motivo_rechazo == "Solicitud duplicada"
 
 
 @pytest.mark.django_db
