@@ -238,3 +238,178 @@ def test_api_accion_aprobar_sigue_funcionando_con_detalles(
     prestamo.refresh_from_db()
     assert response.status_code == 200
     assert prestamo.estado == Prestamo.Estado.APROBADA
+
+
+@pytest.mark.django_db
+def test_api_registrar_devolucion_guarda_cantidades_sin_cerrar(
+    api_client, alumno, panolero
+):
+    tipo_equipo = TipoEquipo.objects.create(
+        nombre="Cables HDMI",
+        tipo_seguimiento=TipoEquipo.TipoSeguimiento.GRANEL,
+        stock_granel=10,
+    )
+    prestamo = Prestamo.objects.create(solicitante=alumno)
+    detalle = DetallePrestamo.objects.create(
+        prestamo=prestamo,
+        tipo_equipo=tipo_equipo,
+        cantidad=4,
+    )
+    aprobar_prestamo(prestamo, panolero)
+    preparar_prestamo(prestamo, panolero)
+    entregar_prestamo(prestamo, panolero)
+    iniciar_devolucion(prestamo)
+    api_client.force_authenticate(user=panolero)
+
+    response = api_client.post(
+        f"/api/prestamos/{prestamo.id}/registrar-devolucion/",
+        {
+            "detalles": [
+                {
+                    "id": detalle.id,
+                    "cantidad_devuelta": 3,
+                    "cantidad_no_devuelta": 1,
+                }
+            ]
+        },
+        format="json",
+    )
+
+    detalle.refresh_from_db()
+    prestamo.refresh_from_db()
+    tipo_equipo.refresh_from_db()
+    assert response.status_code == 200
+    assert detalle.cantidad_devuelta == 3
+    assert detalle.cantidad_no_devuelta == 1
+    assert prestamo.estado == Prestamo.Estado.DEVOLUCION
+    assert tipo_equipo.stock_granel == 6
+
+    cerrar_prestamo(prestamo, panolero)
+    tipo_equipo.refresh_from_db()
+    assert tipo_equipo.stock_granel == 9
+
+
+@pytest.mark.django_db
+def test_api_registrar_devolucion_rechaza_prestamo_fuera_de_devolucion(
+    api_client, alumno, panolero
+):
+    tipo_equipo = TipoEquipo.objects.create(
+        nombre="Adaptadores",
+        tipo_seguimiento=TipoEquipo.TipoSeguimiento.GRANEL,
+        stock_granel=10,
+    )
+    prestamo = Prestamo.objects.create(solicitante=alumno)
+    detalle = DetallePrestamo.objects.create(
+        prestamo=prestamo,
+        tipo_equipo=tipo_equipo,
+        cantidad=2,
+    )
+    api_client.force_authenticate(user=panolero)
+
+    response = api_client.post(
+        f"/api/prestamos/{prestamo.id}/registrar-devolucion/",
+        {
+            "detalles": [
+                {
+                    "id": detalle.id,
+                    "cantidad_devuelta": 1,
+                    "cantidad_no_devuelta": 0,
+                }
+            ]
+        },
+        format="json",
+    )
+
+    detalle.refresh_from_db()
+    assert response.status_code == 400
+    assert detalle.cantidad_devuelta == 0
+    assert detalle.cantidad_no_devuelta == 0
+
+
+@pytest.mark.django_db
+def test_api_registrar_devolucion_rechaza_detalle_de_otro_prestamo(
+    api_client, alumno, panolero
+):
+    tipo_equipo = TipoEquipo.objects.create(
+        nombre="Sensores",
+        tipo_seguimiento=TipoEquipo.TipoSeguimiento.GRANEL,
+        stock_granel=10,
+    )
+    prestamo = Prestamo.objects.create(solicitante=alumno)
+    otro_prestamo = Prestamo.objects.create(solicitante=alumno)
+    detalle = DetallePrestamo.objects.create(
+        prestamo=prestamo,
+        tipo_equipo=tipo_equipo,
+        cantidad=2,
+    )
+    detalle_otro = DetallePrestamo.objects.create(
+        prestamo=otro_prestamo,
+        tipo_equipo=tipo_equipo,
+        cantidad=1,
+    )
+    aprobar_prestamo(prestamo, panolero)
+    preparar_prestamo(prestamo, panolero)
+    entregar_prestamo(prestamo, panolero)
+    iniciar_devolucion(prestamo)
+    api_client.force_authenticate(user=panolero)
+
+    response = api_client.post(
+        f"/api/prestamos/{prestamo.id}/registrar-devolucion/",
+        {
+            "detalles": [
+                {
+                    "id": detalle_otro.id,
+                    "cantidad_devuelta": 1,
+                    "cantidad_no_devuelta": 0,
+                }
+            ]
+        },
+        format="json",
+    )
+
+    detalle.refresh_from_db()
+    detalle_otro.refresh_from_db()
+    assert response.status_code == 400
+    assert detalle.cantidad_devuelta == 0
+    assert detalle_otro.cantidad_devuelta == 0
+
+
+@pytest.mark.django_db
+def test_api_registrar_devolucion_rechaza_suma_mayor_a_cantidad(
+    api_client, alumno, panolero
+):
+    tipo_equipo = TipoEquipo.objects.create(
+        nombre="Pinzas",
+        tipo_seguimiento=TipoEquipo.TipoSeguimiento.GRANEL,
+        stock_granel=10,
+    )
+    prestamo = Prestamo.objects.create(solicitante=alumno)
+    detalle = DetallePrestamo.objects.create(
+        prestamo=prestamo,
+        tipo_equipo=tipo_equipo,
+        cantidad=2,
+    )
+    aprobar_prestamo(prestamo, panolero)
+    preparar_prestamo(prestamo, panolero)
+    entregar_prestamo(prestamo, panolero)
+    iniciar_devolucion(prestamo)
+    api_client.force_authenticate(user=panolero)
+
+    response = api_client.post(
+        f"/api/prestamos/{prestamo.id}/registrar-devolucion/",
+        {
+            "detalles": [
+                {
+                    "id": detalle.id,
+                    "cantidad_devuelta": 2,
+                    "cantidad_no_devuelta": 1,
+                }
+            ]
+        },
+        format="json",
+    )
+
+    detalle.refresh_from_db()
+    assert response.status_code == 400
+    assert detalle.cantidad_devuelta == 0
+    assert detalle.cantidad_no_devuelta == 0
