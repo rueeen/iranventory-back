@@ -10,37 +10,51 @@ from .models import ItemOrdenCompra, OrdenCompra
 
 
 @transaction.atomic
-def enviar_revision_orden_compra(orden_compra: OrdenCompra, usuario) -> OrdenCompra:
+def enviar_revision(orden_compra: OrdenCompra, usuario=None) -> OrdenCompra:
     orden_compra = OrdenCompra.objects.select_for_update().get(pk=orden_compra.pk)
     if orden_compra.estado != OrdenCompra.Estado.BORRADOR:
         raise ValidationError(
             "Solo las órdenes en borrador pueden enviarse a revisión."
+        )
+    if not orden_compra.items.exists():
+        raise ValidationError(
+            "La orden debe tener al menos un ítem antes de enviarse a revisión."
         )
 
     orden_compra.estado = OrdenCompra.Estado.EN_REVISION
     orden_compra.revisado_por = usuario
     orden_compra.fecha_revision = timezone.now()
     orden_compra.save(
-        update_fields=["estado", "revisado_por", "fecha_revision", "updated_at"]
+        update_fields=["estado", "revisado_por",
+                       "fecha_revision", "updated_at"]
     )
     return orden_compra
 
 
 @transaction.atomic
-def aceptar_orden_compra(orden_compra: OrdenCompra, usuario) -> OrdenCompra:
+def aceptar_orden_compra(orden_compra: OrdenCompra, usuario=None) -> OrdenCompra:
+    """
+    Acepta la OC e ingresa al inventario solo lo que fue recibido.
+
+    - Ítems con cantidad_recibida == 0 se ignoran (no tocan el stock).
+    - Ítems SERIE: se crean Unidades con los codigos_activo proporcionados.
+    - Ítems GRANEL: se suma cantidad_recibida al stock_granel.
+    """
     orden_compra = OrdenCompra.objects.select_for_update().get(pk=orden_compra.pk)
     if orden_compra.estado != OrdenCompra.Estado.EN_REVISION:
         raise ValidationError("Solo las órdenes en revisión pueden aceptarse.")
 
-    items = _obtener_items_bloqueados(orden_compra)
+    items = _items_bloqueados(orden_compra)
     if not items:
-        raise ValidationError("La orden de compra debe tener al menos un ítem.")
+        raise ValidationError("La orden debe tener al menos un ítem.")
 
     codigos_por_item = _validar_items_para_aceptacion(items)
 
     for item in items:
+        if item.cantidad_recibida == 0:
+            continue
         if item.tipo_equipo.tipo_seguimiento == TipoEquipo.TipoSeguimiento.SERIE:
-            _crear_unidades_desde_item(item, codigos_por_item[item.pk])
+            _crear_unidades(item, codigos_por_item[item.pk])
         else:
             _sumar_stock_granel(item)
 
@@ -48,7 +62,8 @@ def aceptar_orden_compra(orden_compra: OrdenCompra, usuario) -> OrdenCompra:
     orden_compra.revisado_por = usuario
     orden_compra.fecha_revision = timezone.now()
     orden_compra.save(
-        update_fields=["estado", "revisado_por", "fecha_revision", "updated_at"]
+        update_fields=["estado", "revisado_por",
+                       "fecha_revision", "updated_at"]
     )
     return orden_compra
 
@@ -56,30 +71,33 @@ def aceptar_orden_compra(orden_compra: OrdenCompra, usuario) -> OrdenCompra:
 @transaction.atomic
 def rechazar_orden_compra(
     orden_compra: OrdenCompra,
-    usuario,
-    observacion_rechazo: str = "",
+    usuario=None,
+    observaciones: str = "",
 ) -> OrdenCompra:
     orden_compra = OrdenCompra.objects.select_for_update().get(pk=orden_compra.pk)
     if orden_compra.estado != OrdenCompra.Estado.EN_REVISION:
-        raise ValidationError("Solo las órdenes en revisión pueden rechazarse.")
+        raise ValidationError(
+            "Solo las órdenes en revisión pueden rechazarse.")
 
     orden_compra.estado = OrdenCompra.Estado.RECHAZADA
     orden_compra.revisado_por = usuario
     orden_compra.fecha_revision = timezone.now()
     update_fields = ["estado", "revisado_por", "fecha_revision", "updated_at"]
 
-    if observacion_rechazo:
-        orden_compra.observaciones = observacion_rechazo
+    if observaciones:
+        orden_compra.observaciones = observaciones
         update_fields.append("observaciones")
 
     orden_compra.save(update_fields=update_fields)
     return orden_compra
 
 
-def _obtener_items_bloqueados(orden_compra: OrdenCompra) -> list[ItemOrdenCompra]:
+# ──────────────────────────── helpers privados ────────────────────────────────
+
+def _items_bloqueados(orden_compra: OrdenCompra) -> list[ItemOrdenCompra]:
     return list(
         ItemOrdenCompra.objects.select_for_update()
-        .select_related("tipo_equipo", "tipo_equipo__ubicacion_default")
+        .select_related("tipo_equipo", "tipo_equipo__ubicacion_default", "ubicacion")
         .filter(orden_compra=orden_compra)
         .order_by("id")
     )
@@ -88,194 +106,108 @@ def _obtener_items_bloqueados(orden_compra: OrdenCompra) -> list[ItemOrdenCompra
 def _validar_items_para_aceptacion(
     items: list[ItemOrdenCompra],
 ) -> dict[int, list[str]]:
+    """
+    Valida cada ítem SERIE que tenga cantidad_recibida > 0 y devuelve
+    {item.pk: [codigos]} listos para crear Unidades.
+    """
     codigos_por_item: dict[int, list[str]] = {}
     codigos_de_la_orden: set[str] = set()
-    codigos_repetidos_en_orden: set[str] = set()
+    codigos_repetidos_entre_items: set[str] = set()
 
     for item in items:
         item.full_clean()
+
+        if item.cantidad_recibida == 0:
+            continue
+
         if item.tipo_equipo.tipo_seguimiento != TipoEquipo.TipoSeguimiento.SERIE:
             continue
 
-        codigos = _parsear_codigos_activo(item)
-        codigos_por_item[item.pk] = codigos
+        codigos = [c for c in item.codigos_activo if c]
 
-        if len(codigos) != item.cantidad:
+        if len(codigos) != item.cantidad_recibida:
             raise ValidationError(
                 {
                     "codigos_activo": (
-                        f"El ítem {item.pk} debe tener exactamente "
-                        f"{item.cantidad} código(s) de activo."
+                        f"El ítem {item.pk} ({item.tipo_equipo}) requiere exactamente "
+                        f"{item.cantidad_recibida} código(s) de activo "
+                        f"(uno por unidad recibida)."
                     )
                 }
             )
 
-        codigos_repetidos_item = _obtener_repetidos(codigos)
-        if codigos_repetidos_item:
+        repetidos_en_item = _repetidos(codigos)
+        if repetidos_en_item:
             raise ValidationError(
                 {
                     "codigos_activo": (
                         f"El ítem {item.pk} tiene códigos repetidos: "
-                        f"{', '.join(sorted(codigos_repetidos_item))}."
+                        f"{', '.join(sorted(repetidos_en_item))}."
                     )
                 }
             )
 
         for codigo in codigos:
             if codigo in codigos_de_la_orden:
-                codigos_repetidos_en_orden.add(codigo)
+                codigos_repetidos_entre_items.add(codigo)
             codigos_de_la_orden.add(codigo)
 
-    if codigos_repetidos_en_orden:
+        codigos_por_item[item.pk] = codigos
+
+    if codigos_repetidos_entre_items:
         raise ValidationError(
             {
                 "codigos_activo": (
                     "Hay códigos repetidos entre ítems de la orden: "
-                    f"{', '.join(sorted(codigos_repetidos_en_orden))}."
+                    f"{', '.join(sorted(codigos_repetidos_entre_items))}."
                 )
             }
         )
 
-    codigos_existentes = set(
-        Unidad.objects.filter(codigo_activo__in=codigos_de_la_orden).values_list(
-            "codigo_activo",
-            flat=True,
+    if codigos_de_la_orden:
+        ya_existen = set(
+            Unidad.objects.filter(
+                codigo_activo__in=codigos_de_la_orden
+            ).values_list("codigo_activo", flat=True)
         )
-    )
-    if codigos_existentes:
-        raise ValidationError(
-            {
-                "codigos_activo": (
-                    "Ya existen unidades con estos códigos de activo: "
-                    f"{', '.join(sorted(codigos_existentes))}."
-                )
-            }
-        )
+        if ya_existen:
+            raise ValidationError(
+                {
+                    "codigos_activo": (
+                        "Ya existen unidades con estos códigos de activo: "
+                        f"{', '.join(sorted(ya_existen))}."
+                    )
+                }
+            )
 
     return codigos_por_item
 
 
-def _parsear_codigos_activo(item: ItemOrdenCompra) -> list[str]:
-    if not item.codigos_activo.strip():
-        raise ValidationError(
-            {"codigos_activo": f"El ítem {item.pk} requiere códigos de activo."}
-        )
-
-    codigos = [codigo.strip() for codigo in item.codigos_activo.splitlines()]
-    if any(not codigo for codigo in codigos):
-        raise ValidationError(
-            {
-                "codigos_activo": (
-                    f"El ítem {item.pk} debe registrar un código de activo por línea."
-                )
-            }
-        )
-    return codigos
-
-
-def _obtener_repetidos(codigos: list[str]) -> set[str]:
+def _repetidos(valores: list[str]) -> set[str]:
     vistos: set[str] = set()
     repetidos: set[str] = set()
-    for codigo in codigos:
-        if codigo in vistos:
-            repetidos.add(codigo)
-        vistos.add(codigo)
+    for v in valores:
+        if v in vistos:
+            repetidos.add(v)
+        vistos.add(v)
     return repetidos
 
 
-def _crear_unidades_desde_item(item: ItemOrdenCompra, codigos: list[str]) -> None:
-    for codigo in codigos:
-        Unidad.objects.create(
+def _crear_unidades(item: ItemOrdenCompra, codigos: list[str]) -> None:
+    ubicacion = item.ubicacion or item.tipo_equipo.ubicacion_default
+    Unidad.objects.bulk_create([
+        Unidad(
             tipo_equipo=item.tipo_equipo,
             codigo_activo=codigo,
             estado=Unidad.Estado.BUENO,
             situacion=Unidad.Situacion.DISPONIBLE,
-            ubicacion=item.tipo_equipo.ubicacion_default,
+            ubicacion=ubicacion,
         )
+        for codigo in codigos
+    ])
 
 
 def _sumar_stock_granel(item: ItemOrdenCompra) -> None:
     TipoEquipo.objects.select_for_update().filter(pk=item.tipo_equipo_id).update(
-        stock_granel=F("stock_granel") + item.cantidad,
-from .models import EntradaInventario, LineaEntradaInventario
-
-
-@transaction.atomic
-def enviar_a_revision(entrada: EntradaInventario, usuario=None) -> EntradaInventario:
-    entrada = EntradaInventario.objects.select_for_update().get(pk=entrada.pk)
-    if entrada.estado != EntradaInventario.Estado.REGISTRADA:
-        raise ValidationError(
-            "Solo las entradas registradas pueden enviarse a revisión."
-        )
-
-    if not entrada.lineas.exists():
-        raise ValidationError(
-            "La entrada debe tener al menos una línea para revisarse."
-        )
-
-    entrada.estado = EntradaInventario.Estado.EN_REVISION
-    entrada.revisada_por = usuario
-    entrada.fecha_revision = timezone.now()
-    entrada.save(update_fields=["estado", "revisada_por", "fecha_revision"])
-    return entrada
-
-
-@transaction.atomic
-def aceptar_entrada(entrada: EntradaInventario, usuario=None) -> EntradaInventario:
-    entrada = EntradaInventario.objects.select_for_update().get(pk=entrada.pk)
-    if entrada.estado != EntradaInventario.Estado.EN_REVISION:
-        raise ValidationError("Solo las entradas en revisión pueden aceptarse.")
-
-    lineas = list(
-        LineaEntradaInventario.objects.select_related("tipo_equipo", "ubicacion")
-        .select_for_update()
-        .filter(entrada=entrada)
-    )
-    if not lineas:
-        raise ValidationError(
-            "La entrada debe tener al menos una línea para aceptarse."
-        )
-
-    for linea in lineas:
-        linea.full_clean()
-        if linea.tipo_equipo.tipo_seguimiento == TipoEquipo.TipoSeguimiento.SERIE:
-            _crear_unidades(linea)
-        else:
-            _sumar_stock_granel(linea)
-
-    entrada.estado = EntradaInventario.Estado.ACEPTADA
-    entrada.aceptada_por = usuario
-    entrada.fecha_aceptacion = timezone.now()
-    entrada.save(update_fields=["estado", "aceptada_por", "fecha_aceptacion"])
-    return entrada
-
-
-@transaction.atomic
-def rechazar_entrada(entrada: EntradaInventario, usuario=None) -> EntradaInventario:
-    entrada = EntradaInventario.objects.select_for_update().get(pk=entrada.pk)
-    if entrada.estado != EntradaInventario.Estado.EN_REVISION:
-        raise ValidationError("Solo las entradas en revisión pueden rechazarse.")
-
-    entrada.estado = EntradaInventario.Estado.RECHAZADA
-    entrada.revisada_por = usuario or entrada.revisada_por
-    entrada.fecha_revision = entrada.fecha_revision or timezone.now()
-    entrada.save(update_fields=["estado", "revisada_por", "fecha_revision"])
-    return entrada
-
-
-def _crear_unidades(linea: LineaEntradaInventario) -> None:
-    unidades = [
-        Unidad(
-            tipo_equipo=linea.tipo_equipo,
-            codigo_activo=codigo,
-            ubicacion=linea.ubicacion or linea.tipo_equipo.ubicacion_default,
-        )
-        for codigo in linea.codigos_activo
-    ]
-    Unidad.objects.bulk_create(unidades)
-
-
-def _sumar_stock_granel(linea: LineaEntradaInventario) -> None:
-    TipoEquipo.objects.select_for_update().filter(pk=linea.tipo_equipo_id).update(
-        stock_granel=F("stock_granel") + linea.cantidad,
+        stock_granel=F("stock_granel") + item.cantidad_recibida,
     )
