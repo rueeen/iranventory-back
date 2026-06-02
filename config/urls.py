@@ -32,6 +32,7 @@ router.register("ordenes-compra", OrdenCompraViewSet, basename="orden-compra")
 router.register(
     "items-orden-compra", ItemOrdenCompraViewSet, basename="item-orden-compra"
 )
+router.register("prestamos", PrestamoViewSet, basename="prestamo")
 
 urlpatterns = [
     path("admin/", admin.site.urls),
