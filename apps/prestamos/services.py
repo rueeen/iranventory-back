@@ -115,6 +115,41 @@ def iniciar_devolucion(prestamo: Prestamo) -> Prestamo:
 
 
 @transaction.atomic
+def registrar_devolucion(prestamo: Prestamo, detalles: list[dict]) -> Prestamo:
+    prestamo = Prestamo.objects.select_for_update().get(pk=prestamo.pk)
+    if prestamo.estado != Prestamo.Estado.DEVOLUCION:
+        raise ValidationError(
+            "Solo se puede registrar devolución en préstamos en estado devolución."
+        )
+
+    detalles_por_id = {
+        detalle.id: detalle for detalle in _detalles_bloqueados(prestamo)
+    }
+    for detalle_data in detalles:
+        detalle_id = detalle_data["id"]
+        detalle = detalles_por_id.get(detalle_id)
+        if detalle is None:
+            raise ValidationError(
+                f"El detalle {detalle_id} no pertenece al préstamo indicado."
+            )
+
+        cantidad_devuelta = detalle_data["cantidad_devuelta"]
+        cantidad_no_devuelta = detalle_data["cantidad_no_devuelta"]
+        if cantidad_devuelta + cantidad_no_devuelta > detalle.cantidad:
+            raise ValidationError(
+                "La suma devuelta y no devuelta no puede superar "
+                f"la cantidad prestada del detalle {detalle_id}."
+            )
+
+        detalle.cantidad_devuelta = cantidad_devuelta
+        detalle.cantidad_no_devuelta = cantidad_no_devuelta
+        detalle.full_clean()
+        detalle.save(update_fields=["cantidad_devuelta", "cantidad_no_devuelta"])
+
+    return prestamo
+
+
+@transaction.atomic
 def cerrar_prestamo(prestamo: Prestamo, usuario=None) -> Prestamo:
     prestamo = Prestamo.objects.select_for_update().get(pk=prestamo.pk)
     if prestamo.estado != Prestamo.Estado.DEVOLUCION:

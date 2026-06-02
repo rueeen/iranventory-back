@@ -37,6 +37,25 @@ class DetallePrestamoSerializer(serializers.ModelSerializer):
             "cantidad_no_devuelta",
             "observaciones",
         ]
+        read_only_fields = ["cantidad_devuelta", "cantidad_no_devuelta"]
+
+
+class RegistrarDevolucionDetalleSerializer(serializers.Serializer):
+    id = serializers.IntegerField()
+    cantidad_devuelta = serializers.IntegerField(min_value=0)
+    cantidad_no_devuelta = serializers.IntegerField(min_value=0)
+
+
+class RegistrarDevolucionSerializer(serializers.Serializer):
+    detalles = RegistrarDevolucionDetalleSerializer(many=True, allow_empty=False)
+
+    def validate_detalles(self, detalles):
+        ids = [detalle["id"] for detalle in detalles]
+        if len(ids) != len(set(ids)):
+            raise serializers.ValidationError(
+                "No se puede informar el mismo detalle más de una vez."
+            )
+        return detalles
 
 
 class PrestamoSerializer(serializers.ModelSerializer):

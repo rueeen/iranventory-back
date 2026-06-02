@@ -7,11 +7,12 @@ from apps.cuentas.models import Usuario
 from apps.cuentas.permissions import PrestamoPermiso
 
 from .models import Prestamo
-from .serializers import PrestamoSerializer
+from .serializers import PrestamoSerializer, RegistrarDevolucionSerializer
 from .services import (
     aprobar_prestamo,
     cerrar_prestamo,
     entregar_prestamo,
+    registrar_devolucion as registrar_devolucion_prestamo,
     iniciar_devolucion,
     preparar_prestamo,
     rechazar_prestamo,
@@ -85,6 +86,19 @@ class PrestamoViewSet(viewsets.ModelViewSet):
             self.get_serializer(prestamo).data, status=status.HTTP_200_OK
         )
 
+    @decorators.action(detail=True, methods=["post"], url_path="registrar-devolucion")
+    def registrar_devolucion(self, request, pk=None):
+        serializer = RegistrarDevolucionSerializer(data=request.data)
+        serializer.is_valid(raise_exception=True)
+        prestamo = _ejecutar_transicion(
+            registrar_devolucion_prestamo,
+            self.get_object(),
+            serializer.validated_data["detalles"],
+        )
+        return response.Response(
+            self.get_serializer(prestamo).data, status=status.HTTP_200_OK
+        )
+
     @decorators.action(detail=True, methods=["post"])
     def cerrar(self, request, pk=None):
         prestamo = _ejecutar_transicion(
@@ -99,4 +113,6 @@ def _ejecutar_transicion(funcion, *args, **kwargs):
     try:
         return funcion(*args, **kwargs)
     except DjangoValidationError as exc:
+        if hasattr(exc, "message_dict"):
+            raise serializers.ValidationError(exc.message_dict) from exc
         raise serializers.ValidationError(exc.messages) from exc
