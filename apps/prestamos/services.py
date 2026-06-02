@@ -45,7 +45,10 @@ def preparar_prestamo(prestamo: Prestamo, usuario=None) -> Prestamo:
     for detalle in detalles:
         detalle.full_clean()
         if detalle.tipo_equipo.tipo_seguimiento == TipoEquipo.TipoSeguimiento.SERIE:
-            if detalle.unidad.situacion != Unidad.Situacion.DISPONIBLE:
+            if (
+                detalle.unidad.situacion != Unidad.Situacion.DISPONIBLE
+                or detalle.unidad.estado != Unidad.Estado.BUENO
+            ):
                 raise ValidationError(
                     f"La unidad {detalle.unidad} no está disponible para preparar."
                 )
@@ -71,7 +74,10 @@ def entregar_prestamo(prestamo: Prestamo, usuario=None) -> Prestamo:
         detalle.full_clean()
         if detalle.tipo_equipo.tipo_seguimiento == TipoEquipo.TipoSeguimiento.SERIE:
             unidad = Unidad.objects.select_for_update().get(pk=detalle.unidad_id)
-            if unidad.situacion != Unidad.Situacion.DISPONIBLE:
+            if (
+                unidad.situacion != Unidad.Situacion.DISPONIBLE
+                or unidad.estado != Unidad.Estado.BUENO
+            ):
                 raise ValidationError(f"La unidad {unidad} ya no está disponible.")
             unidad.situacion = Unidad.Situacion.PRESTADA
             unidad.save(update_fields=["situacion"])

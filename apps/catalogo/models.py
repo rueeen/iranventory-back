@@ -113,7 +113,7 @@ class TipoEquipo(models.Model):
         if self.tipo_seguimiento == self.TipoSeguimiento.GRANEL:
             return self.stock_granel
 
-        return self.unidades.filter(situacion="DISPONIBLE").count()
+        return self.unidades.filter(situacion="DISPONIBLE", estado="BUENO").count()
 
     @property
     def brecha(self) -> int:

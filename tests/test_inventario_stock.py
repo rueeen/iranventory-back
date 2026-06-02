@@ -42,3 +42,29 @@ def test_brecha_usa_stock_total_y_no_sube_por_unidades_prestadas():
     assert tipo_equipo.stock_total == 3
     assert tipo_equipo.stock_disponible == 2
     assert tipo_equipo.brecha == 1
+
+
+@pytest.mark.django_db
+def test_stock_disponible_por_serie_solo_cuenta_unidades_disponibles_y_buenas():
+    tipo_equipo = TipoEquipo.objects.create(
+        nombre="Fuente de poder",
+        tipo_seguimiento=TipoEquipo.TipoSeguimiento.SERIE,
+    )
+    Unidad.objects.create(tipo_equipo=tipo_equipo, codigo_activo="FDP-001")
+    Unidad.objects.create(
+        tipo_equipo=tipo_equipo,
+        codigo_activo="FDP-002",
+        estado=Unidad.Estado.REPARABLE,
+    )
+    Unidad.objects.create(
+        tipo_equipo=tipo_equipo,
+        codigo_activo="FDP-003",
+        estado=Unidad.Estado.MALO,
+    )
+    Unidad.objects.create(
+        tipo_equipo=tipo_equipo,
+        codigo_activo="FDP-004",
+        situacion=Unidad.Situacion.REPARACION,
+    )
+
+    assert tipo_equipo.stock_disponible == 1
