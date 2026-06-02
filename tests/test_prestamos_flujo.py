@@ -1,6 +1,7 @@
 import pytest
 from django.contrib.auth import get_user_model
 from django.core.exceptions import ValidationError
+from rest_framework.test import APIClient
 
 from apps.catalogo.models import TipoEquipo
 from apps.cuentas.models import Usuario
@@ -22,6 +23,20 @@ def alumno():
         password="clave-segura-123",
         rol=Usuario.Rol.ALUMNO,
     )
+
+
+@pytest.fixture
+def panolero():
+    return get_user_model().objects.create_user(
+        username="panolero-prestamo",
+        password="clave-segura-123",
+        rol=Usuario.Rol.PANOLERO,
+    )
+
+
+@pytest.fixture
+def api_client():
+    return APIClient()
 
 
 @pytest.mark.django_db
@@ -130,3 +145,96 @@ def test_entregar_prestamo_serie_revalida_situacion_y_estado(alumno, situacion, 
 
     with pytest.raises(ValidationError):
         entregar_prestamo(prestamo)
+
+
+@pytest.mark.django_db
+def test_api_permite_editar_detalles_en_estado_solicitada(api_client, alumno, panolero):
+    tipo_equipo = TipoEquipo.objects.create(
+        nombre="Resistencias",
+        tipo_seguimiento=TipoEquipo.TipoSeguimiento.GRANEL,
+        stock_granel=10,
+    )
+    prestamo = Prestamo.objects.create(solicitante=alumno)
+    DetallePrestamo.objects.create(
+        prestamo=prestamo,
+        tipo_equipo=tipo_equipo,
+        cantidad=1,
+    )
+    api_client.force_authenticate(user=panolero)
+
+    response = api_client.patch(
+        f"/api/prestamos/{prestamo.id}/",
+        {
+            "detalles": [
+                {
+                    "tipo_equipo_id": tipo_equipo.id,
+                    "cantidad": 3,
+                }
+            ]
+        },
+        format="json",
+    )
+
+    assert response.status_code == 200
+    assert list(prestamo.detalles.values_list("cantidad", flat=True)) == [3]
+
+
+@pytest.mark.django_db
+def test_api_bloquea_editar_detalles_despues_de_aprobada(api_client, alumno, panolero):
+    tipo_equipo = TipoEquipo.objects.create(
+        nombre="Capacitores",
+        tipo_seguimiento=TipoEquipo.TipoSeguimiento.GRANEL,
+        stock_granel=10,
+    )
+    prestamo = Prestamo.objects.create(solicitante=alumno)
+    DetallePrestamo.objects.create(
+        prestamo=prestamo,
+        tipo_equipo=tipo_equipo,
+        cantidad=1,
+    )
+    aprobar_prestamo(prestamo, panolero)
+    api_client.force_authenticate(user=panolero)
+
+    response = api_client.patch(
+        f"/api/prestamos/{prestamo.id}/",
+        {
+            "observaciones": "Cambio permitido sin tocar detalles",
+            "detalles": [
+                {
+                    "tipo_equipo_id": tipo_equipo.id,
+                    "cantidad": 4,
+                }
+            ],
+        },
+        format="json",
+    )
+
+    prestamo.refresh_from_db()
+    assert response.status_code == 400
+    assert "solo pueden modificarse" in str(response.data["detalles"])
+    assert prestamo.observaciones == ""
+    assert list(prestamo.detalles.values_list("cantidad", flat=True)) == [1]
+
+
+@pytest.mark.django_db
+def test_api_accion_aprobar_sigue_funcionando_con_detalles(
+    api_client, alumno, panolero
+):
+    tipo_equipo = TipoEquipo.objects.create(
+        nombre="Protoboard",
+        tipo_seguimiento=TipoEquipo.TipoSeguimiento.GRANEL,
+        stock_granel=10,
+    )
+    prestamo = Prestamo.objects.create(solicitante=alumno)
+    DetallePrestamo.objects.create(
+        prestamo=prestamo,
+        tipo_equipo=tipo_equipo,
+        cantidad=2,
+    )
+    api_client.force_authenticate(user=panolero)
+
+    response = api_client.post(f"/api/prestamos/{prestamo.id}/aprobar/")
+
+    prestamo.refresh_from_db()
+    assert response.status_code == 200
+    assert prestamo.estado == Prestamo.Estado.APROBADA

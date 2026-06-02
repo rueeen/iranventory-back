@@ -92,6 +92,16 @@ class PrestamoSerializer(serializers.ModelSerializer):
 
     def update(self, instance, validated_data):
         detalles_data = validated_data.pop("detalles", None)
+        if detalles_data is not None and instance.estado != Prestamo.Estado.SOLICITADA:
+            raise serializers.ValidationError(
+                {
+                    "detalles": (
+                        "Los detalles del préstamo solo pueden modificarse cuando "
+                        "el préstamo está en estado SOLICITADA."
+                    )
+                }
+            )
+
         instance = super().update(instance, validated_data)
         if detalles_data is not None:
             instance.detalles.all().delete()
