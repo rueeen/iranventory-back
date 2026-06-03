@@ -18,6 +18,7 @@ from apps.catalogo.views import (
     UbicacionViewSet,
 )
 from apps.compras.views import ItemOrdenCompraViewSet, OrdenCompraViewSet
+from apps.cuentas.views import MeView, RegistroView
 from apps.inventario.views import UnidadViewSet
 from apps.prestamos.views import PrestamoViewSet
 
@@ -45,5 +46,7 @@ urlpatterns = [
     path("api/token/", TokenObtainPairView.as_view(), name="token_obtain_pair"),
     path("api/token/refresh/", TokenRefreshView.as_view(), name="token_refresh"),
     path("api/token/blacklist/", TokenBlacklistView.as_view(), name="token_blacklist"),
+    path("api/me/", MeView.as_view(), name="me"),
+    path("api/registro/", RegistroView.as_view(), name="registro"),
     path("api/", include(router.urls)),
 ]
