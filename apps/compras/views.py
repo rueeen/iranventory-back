@@ -5,17 +5,28 @@ from rest_framework.filters import SearchFilter
 
 from apps.cuentas.permissions import PermisoOrdenCompra
 
-from .models import ItemOrdenCompra, OrdenCompra
+from .models import ItemOrdenCompra, OrdenCompra, Proveedor
 from .serializers import (
     ItemOrdenCompraSerializer,
     OrdenCompraSerializer,
+    ProveedorSerializer,
     RechazarOrdenCompraSerializer,
 )
 from .services import aceptar_orden_compra, enviar_revision, rechazar_orden_compra
 
 
+class ProveedorViewSet(viewsets.ModelViewSet):
+    queryset = Proveedor.objects.all()
+    serializer_class = ProveedorSerializer
+    permission_classes = [PermisoOrdenCompra]
+    filter_backends = [filters.DjangoFilterBackend, SearchFilter]
+    filterset_fields = ["activo"]
+    search_fields = ["razon_social", "rut"]
+
+
 class OrdenCompraViewSet(viewsets.ModelViewSet):
     queryset = OrdenCompra.objects.select_related(
+        "proveedor",
         "creado_por",
         "revisado_por",
     ).prefetch_related(
@@ -31,7 +42,12 @@ class OrdenCompraViewSet(viewsets.ModelViewSet):
     permission_classes = [PermisoOrdenCompra]
     filter_backends = [filters.DjangoFilterBackend, SearchFilter]
     filterset_fields = ["estado"]
-    search_fields = ["numero", "proveedor", "numero_documento"]
+    search_fields = [
+        "numero",
+        "proveedor__razon_social",
+        "proveedor__rut",
+        "numero_documento",
+    ]
 
     def update(self, request, *args, **kwargs):
         orden = self.get_object()
