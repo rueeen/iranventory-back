@@ -77,16 +77,14 @@ class OrdenCompraViewSet(viewsets.ModelViewSet):
 
     @decorators.action(detail=True, methods=["post"], url_path="enviar-revision")
     def enviar_revision(self, request, pk=None):
-        orden = _ejecutar_accion(
-            enviar_revision, self.get_object(), request.user)
+        orden = _ejecutar_accion(enviar_revision, self.get_object(), request.user)
         return response.Response(
             self.get_serializer(orden).data, status=status.HTTP_200_OK
         )
 
     @decorators.action(detail=True, methods=["post"])
     def aceptar(self, request, pk=None):
-        orden = _ejecutar_accion(aceptar_orden_compra,
-                                 self.get_object(), request.user)
+        orden = _ejecutar_accion(aceptar_orden_compra, self.get_object(), request.user)
         return response.Response(
             self.get_serializer(orden).data, status=status.HTTP_200_OK
         )
@@ -123,25 +121,34 @@ class ItemOrdenCompraViewSet(viewsets.ModelViewSet):
         """Lanza ValidationError si la OC asociada no está en BORRADOR."""
         if item:
             orden_compra_id = item.orden_compra_id
+        if not orden_compra_id:
+            raise serializers.ValidationError(
+                {"orden_compra_id": "Este campo es requerido."}
+            )
         try:
             oc = OrdenCompra.objects.get(pk=orden_compra_id)
         except OrdenCompra.DoesNotExist:
             raise serializers.ValidationError(
-                {"orden_compra": "La orden de compra indicada no existe."}
+                {"orden_compra_id": "La orden de compra indicada no existe."}
             ) from None
         if not oc.es_editable:
             raise serializers.ValidationError(
                 f"La orden {oc.numero} está en estado '{oc.get_estado_display()}'"
                 " y no admite cambios en sus ítems."
             )
+        return oc
 
     def create(self, request, *args, **kwargs):
-        oc_id = request.data.get("orden_compra")
+        oc_id = request.data.get("orden_compra_id")
         self._verificar_oc_editable(orden_compra_id=oc_id)
         return super().create(request, *args, **kwargs)
 
     def update(self, request, *args, **kwargs):
-        self._verificar_oc_editable(item=self.get_object())
+        item = self.get_object()
+        self._verificar_oc_editable(item=item)
+        nuevo_oc_id = request.data.get("orden_compra_id")
+        if nuevo_oc_id and str(nuevo_oc_id) != str(item.orden_compra_id):
+            self._verificar_oc_editable(orden_compra_id=nuevo_oc_id)
         return super().update(request, *args, **kwargs)
 
     def partial_update(self, request, *args, **kwargs):

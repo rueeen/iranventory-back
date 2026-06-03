@@ -2,6 +2,7 @@
 Tests de API para el módulo de compras.
 Verifica permisos, creación, transiciones de estado y recepción parcial.
 """
+
 import pytest
 from django.contrib.auth import get_user_model
 from rest_framework.test import APIClient
@@ -12,6 +13,7 @@ from apps.cuentas.models import Usuario
 from apps.inventario.models import Unidad
 
 # ──────────────────────────── fixtures ────────────────────────────────────────
+
 
 @pytest.fixture
 def alumno(db):
@@ -57,6 +59,7 @@ def tipo_granel(db):
 
 # ──────────────────────────── permisos ────────────────────────────────────────
 
+
 @pytest.mark.django_db
 def test_alumno_no_puede_listar_ni_crear_oc(client, alumno):
     OrdenCompra.objects.create(numero="OC-LECTURA")
@@ -74,6 +77,7 @@ def test_alumno_no_puede_listar_ni_crear_oc(client, alumno):
 
 
 # ──────────────────────────── creación ────────────────────────────────────────
+
 
 @pytest.mark.django_db
 def test_panolero_crea_oc_con_items(client, panolero, tipo_serie):
@@ -100,7 +104,120 @@ def test_panolero_crea_oc_con_items(client, panolero, tipo_serie):
     assert r.data["items"][0]["pendiente"] == 2
 
 
+@pytest.mark.django_db
+def test_panolero_agrega_item_a_oc_borrador_con_orden_compra_id(
+    client, panolero, tipo_serie
+):
+    client.force_authenticate(user=panolero)
+    oc_response = client.post("/api/ordenes-compra/", {}, format="json")
+
+    r = client.post(
+        "/api/items-orden-compra/",
+        {
+            "orden_compra_id": oc_response.data["id"],
+            "tipo_equipo_id": tipo_serie.id,
+            "cantidad_solicitada": 2,
+        },
+        format="json",
+    )
+
+    assert oc_response.status_code == 201
+    assert r.status_code == 201
+    assert r.data["orden_compra"] == oc_response.data["id"]
+    assert "orden_compra_id" not in r.data
+    assert r.data["tipo_equipo"]["id"] == tipo_serie.id
+    assert r.data["pendiente"] == 2
+    assert (
+        ItemOrdenCompra.objects.get(id=r.data["id"]).orden_compra_id
+        == oc_response.data["id"]
+    )
+
+
+@pytest.mark.django_db
+def test_panolero_edita_y_elimina_item_si_oc_esta_en_borrador(
+    client, panolero, tipo_serie
+):
+    oc = OrdenCompra.objects.create(numero="OC-ITEM-BORR")
+    item = ItemOrdenCompra.objects.create(
+        orden_compra=oc, tipo_equipo=tipo_serie, cantidad_solicitada=2
+    )
+    client.force_authenticate(user=panolero)
+
+    actualizado = client.patch(
+        f"/api/items-orden-compra/{item.id}/",
+        {"cantidad_solicitada": 3},
+        format="json",
+    )
+    eliminado = client.delete(f"/api/items-orden-compra/{item.id}/")
+
+    assert actualizado.status_code == 200
+    assert actualizado.data["cantidad_solicitada"] == 3
+    assert eliminado.status_code == 204
+    assert not ItemOrdenCompra.objects.filter(id=item.id).exists()
+
+
+@pytest.mark.django_db
+@pytest.mark.parametrize(
+    "estado",
+    [
+        OrdenCompra.Estado.EN_REVISION,
+        OrdenCompra.Estado.ACEPTADA,
+        OrdenCompra.Estado.RECHAZADA,
+    ],
+)
+def test_no_se_pueden_modificar_items_si_oc_no_esta_en_borrador(
+    client, panolero, tipo_serie, estado
+):
+    oc = OrdenCompra.objects.create(numero=f"OC-ITEM-{estado}", estado=estado)
+    item = ItemOrdenCompra.objects.create(
+        orden_compra=oc, tipo_equipo=tipo_serie, cantidad_solicitada=2
+    )
+    client.force_authenticate(user=panolero)
+
+    actualizado = client.patch(
+        f"/api/items-orden-compra/{item.id}/",
+        {"cantidad_solicitada": 3},
+        format="json",
+    )
+    eliminado = client.delete(f"/api/items-orden-compra/{item.id}/")
+
+    item.refresh_from_db()
+    assert actualizado.status_code == 400
+    assert eliminado.status_code == 400
+    assert item.cantidad_solicitada == 2
+
+
+@pytest.mark.django_db
+@pytest.mark.parametrize(
+    "estado",
+    [
+        OrdenCompra.Estado.EN_REVISION,
+        OrdenCompra.Estado.ACEPTADA,
+        OrdenCompra.Estado.RECHAZADA,
+    ],
+)
+def test_no_se_pueden_crear_items_en_oc_no_borrador(
+    client, panolero, tipo_serie, estado
+):
+    oc = OrdenCompra.objects.create(numero=f"OC-CREA-ITEM-{estado}", estado=estado)
+    client.force_authenticate(user=panolero)
+
+    r = client.post(
+        "/api/items-orden-compra/",
+        {
+            "orden_compra_id": oc.id,
+            "tipo_equipo_id": tipo_serie.id,
+            "cantidad_solicitada": 1,
+        },
+        format="json",
+    )
+
+    assert r.status_code == 400
+    assert not ItemOrdenCompra.objects.filter(orden_compra=oc).exists()
+
+
 # ──────────────────────────── enviar a revisión ───────────────────────────────
+
 
 @pytest.mark.django_db
 def test_panolero_envia_oc_a_revision(client, panolero, tipo_granel):
@@ -128,6 +245,7 @@ def test_enviar_revision_sin_items_devuelve_400(client, panolero):
 
 
 # ──────────────────────────── aceptar ────────────────────────────────────────
+
 
 @pytest.mark.django_db
 def test_panolero_no_puede_aceptar_oc(client, panolero, tipo_granel):
@@ -170,8 +288,7 @@ def test_aceptar_oc_serie_recepcion_total(client, director, tipo_serie):
     assert r.status_code == 200
     assert r.data["estado"] == OrdenCompra.Estado.ACEPTADA
     codigos = list(
-        Unidad.objects.values_list(
-            "codigo_activo", flat=True).order_by("codigo_activo")
+        Unidad.objects.values_list("codigo_activo", flat=True).order_by("codigo_activo")
     )
     assert codigos == ["OSC-001", "OSC-002"]
 
@@ -236,9 +353,7 @@ def test_aceptar_item_no_recibido_no_toca_stock(client, director, tipo_granel):
 
 
 @pytest.mark.django_db
-def test_aceptar_codigo_duplicado_existente_hace_rollback(
-    client, director, tipo_serie
-):
+def test_aceptar_codigo_duplicado_existente_hace_rollback(client, director, tipo_serie):
     Unidad.objects.create(tipo_equipo=tipo_serie, codigo_activo="OSC-001")
     oc = OrdenCompra.objects.create(
         numero="OC-DUP", estado=OrdenCompra.Estado.EN_REVISION
@@ -262,6 +377,7 @@ def test_aceptar_codigo_duplicado_existente_hace_rollback(
 
 # ──────────────────────────── rechazar ───────────────────────────────────────
 
+
 @pytest.mark.django_db
 def test_rechazar_oc_registra_observacion(client, director):
     oc = OrdenCompra.objects.create(
@@ -282,6 +398,7 @@ def test_rechazar_oc_registra_observacion(client, director):
 
 
 # ──────────────────────────── filtros ────────────────────────────────────────
+
 
 @pytest.mark.django_db
 def test_filtro_items_por_tipo_equipo(client, panolero, tipo_serie, tipo_granel):
