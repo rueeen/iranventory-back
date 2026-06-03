@@ -3,11 +3,51 @@
 Backend Django 5 + Django REST Framework para el sistema de inventario y préstamo
 de equipamiento del Taller de Automatización y Robótica.
 
-## Fase actual
+## Estado actual del proyecto
 
-Fase 2: inicio del módulo de compras. Se modelan órdenes de compra e ítems
-como base para el futuro flujo de entrada de inventario, sin aceptación de
-órdenes, importación Excel ni préstamos en esta etapa.
+El backend ya incluye los módulos principales para operar cuentas, catálogo,
+inventario, compras y préstamos. El estado documentado anteriormente como
+"Fase 2" quedó desactualizado: el código contiene flujo de compras con aceptación
+o rechazo de órdenes y un módulo de préstamos con su ciclo de estados.
+
+El frontend React todavía no se toca en este repositorio; esta documentación
+refleja únicamente el estado actual del backend.
+
+## Apps existentes
+
+- `cuentas`
+- `catalogo`
+- `inventario`
+- `compras`
+- `prestamos`
+
+## Flujo de compras
+
+El flujo de una orden de compra es:
+
+```text
+BORRADOR -> EN_REVISION -> ACEPTADA / RECHAZADA
+```
+
+Pendiente: no asumir funcionalidades fuera de este flujo si no están presentes
+en el código o en sus pruebas.
+
+## Flujo de préstamos
+
+El flujo principal de un préstamo es:
+
+```text
+SOLICITADA -> APROBADA -> PREPARADA -> ENTREGADA -> DEVOLUCION -> CERRADA
+```
+
+También existe una rama de rechazo:
+
+```text
+SOLICITADA -> RECHAZADA
+```
+
+Pendiente: cualquier ampliación del flujo o integración no presente en el backend
+actual debe documentarse e implementarse por separado.
 
 ## Desarrollo local
 
