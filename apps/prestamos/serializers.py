@@ -35,9 +35,14 @@ class DetallePrestamoSerializer(serializers.ModelSerializer):
             "cantidad",
             "cantidad_devuelta",
             "cantidad_no_devuelta",
+            "condicion_devolucion",
             "observaciones",
         ]
-        read_only_fields = ["cantidad_devuelta", "cantidad_no_devuelta"]
+        read_only_fields = [
+            "cantidad_devuelta",
+            "cantidad_no_devuelta",
+            "condicion_devolucion",
+        ]
 
 
 class RegistrarDevolucionDetalleSerializer(serializers.Serializer):

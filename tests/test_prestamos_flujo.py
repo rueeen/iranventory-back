@@ -769,6 +769,7 @@ def test_api_registrar_devolucion_guarda_cantidades_sin_cerrar(
                     "id": detalle.id,
                     "cantidad_devuelta": 3,
                     "cantidad_no_devuelta": 1,
+                    "condicion": Unidad.Estado.MALO,
                 }
             ]
         },
@@ -781,8 +782,14 @@ def test_api_registrar_devolucion_guarda_cantidades_sin_cerrar(
     assert response.status_code == 200
     assert detalle.cantidad_devuelta == 3
     assert detalle.cantidad_no_devuelta == 1
+    assert detalle.condicion_devolucion == Unidad.Estado.MALO
+    assert response.data["detalles"][0]["condicion_devolucion"] == Unidad.Estado.MALO
     assert prestamo.estado == Prestamo.Estado.DEVOLUCION
     assert tipo_equipo.stock_granel == 6
+
+    get_response = api_client.get(f"/api/prestamos/{prestamo.id}/")
+    assert get_response.status_code == 200
+    assert get_response.data["detalles"][0]["condicion_devolucion"] == Unidad.Estado.MALO
 
     cerrar_prestamo(prestamo, panolero)
     tipo_equipo.refresh_from_db()
