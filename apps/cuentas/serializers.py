@@ -19,6 +19,18 @@ class UsuarioSerializer(serializers.ModelSerializer):
         return value
 
 
+class UsuarioAdminSerializer(serializers.ModelSerializer):
+    class Meta:
+        model = Usuario
+        fields = ["id", "username", "email", "first_name", "last_name", "rol", "rut"]
+        read_only_fields = ["id", "username"]
+
+    def validate_rut(self, value):
+        if value and not RUT_REGEX.fullmatch(value):
+            raise serializers.ValidationError("El RUT debe tener formato 12345678-9.")
+        return value
+
+
 class RegistroSerializer(serializers.ModelSerializer):
     password = serializers.CharField(min_length=8, write_only=True)
     email = serializers.EmailField(required=True)

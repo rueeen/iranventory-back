@@ -18,7 +18,7 @@ from apps.catalogo.views import (
     UbicacionViewSet,
 )
 from apps.compras.views import ItemOrdenCompraViewSet, OrdenCompraViewSet
-from apps.cuentas.views import MeView, RegistroView
+from apps.cuentas.views import MeView, RegistroView, UsuarioViewSet
 from apps.inventario.views import UnidadViewSet
 from apps.prestamos.views import PrestamoViewSet
 
@@ -34,6 +34,7 @@ router.register(
     "items-orden-compra", ItemOrdenCompraViewSet, basename="item-orden-compra"
 )
 router.register("prestamos", PrestamoViewSet, basename="prestamo")
+router.register("usuarios", UsuarioViewSet, basename="usuario")
 
 urlpatterns = [
     path("admin/", admin.site.urls),
