@@ -3,7 +3,7 @@ from django_filters import rest_framework as filters
 from rest_framework import decorators, response, serializers, status, viewsets
 from rest_framework.filters import SearchFilter
 
-from apps.cuentas.permissions import SoloLecturaOPanolero
+from apps.cuentas.permissions import PermisoOrdenCompra
 
 from .models import ItemOrdenCompra, OrdenCompra
 from .serializers import (
@@ -28,7 +28,7 @@ class OrdenCompraViewSet(viewsets.ModelViewSet):
         "items__ubicacion",
     )
     serializer_class = OrdenCompraSerializer
-    permission_classes = [SoloLecturaOPanolero]
+    permission_classes = [PermisoOrdenCompra]
     filter_backends = [filters.DjangoFilterBackend, SearchFilter]
     filterset_fields = ["estado"]
     search_fields = ["numero", "proveedor", "numero_documento"]
@@ -86,7 +86,7 @@ class ItemOrdenCompraViewSet(viewsets.ModelViewSet):
         "ubicacion",
     ).prefetch_related("tipo_equipo__carreras", "tipo_equipo__asignaturas")
     serializer_class = ItemOrdenCompraSerializer
-    permission_classes = [SoloLecturaOPanolero]
+    permission_classes = [PermisoOrdenCompra]
     filter_backends = [filters.DjangoFilterBackend]
     filterset_fields = ["tipo_equipo", "orden_compra"]
 

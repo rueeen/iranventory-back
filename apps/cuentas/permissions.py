@@ -38,6 +38,29 @@ class SoloLecturaOPanolero(BasePermission):
         return request.user.rol in {Usuario.Rol.PANOLERO, Usuario.Rol.DIRECTOR}
 
 
+class PermisoOrdenCompra(BasePermission):
+    """Permisos para órdenes de compra con aprobación exclusiva de DIRECCIÓN."""
+
+    ACCIONES_APROBACION = frozenset({"aceptar", "rechazar"})
+
+    def has_permission(self, request, view):
+        if not (request.user and request.user.is_authenticated):
+            return False
+
+        es_staff_compras = request.user.rol in {
+            Usuario.Rol.PANOLERO,
+            Usuario.Rol.DIRECTOR,
+        }
+
+        if request.method in SAFE_METHODS:
+            return es_staff_compras
+
+        if view.action in self.ACCIONES_APROBACION:
+            return request.user.rol == Usuario.Rol.DIRECTOR
+
+        return es_staff_compras
+
+
 class PrestamoPermiso(BasePermission):
     """Solicitudes para autenticados; gestión de flujo para PAÑOLERO o DIRECTOR."""
 
