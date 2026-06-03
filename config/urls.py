@@ -17,7 +17,11 @@ from apps.catalogo.views import (
     TipoEquipoViewSet,
     UbicacionViewSet,
 )
-from apps.compras.views import ItemOrdenCompraViewSet, OrdenCompraViewSet
+from apps.compras.views import (
+    ItemOrdenCompraViewSet,
+    OrdenCompraViewSet,
+    ProveedorViewSet,
+)
 from apps.cuentas.views import MeView, RegistroView, UsuarioViewSet
 from apps.inventario.views import UnidadViewSet
 from apps.prestamos.views import PrestamoViewSet
@@ -29,6 +33,7 @@ router.register("asignaturas", AsignaturaViewSet, basename="asignatura")
 router.register("ubicaciones", UbicacionViewSet, basename="ubicacion")
 router.register("tipos-equipo", TipoEquipoViewSet, basename="tipo-equipo")
 router.register("unidades", UnidadViewSet, basename="unidad")
+router.register("proveedores", ProveedorViewSet, basename="proveedor")
 router.register("ordenes-compra", OrdenCompraViewSet, basename="orden-compra")
 router.register(
     "items-orden-compra", ItemOrdenCompraViewSet, basename="item-orden-compra"

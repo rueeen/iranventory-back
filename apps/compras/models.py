@@ -1,8 +1,69 @@
+import re
+from decimal import ROUND_HALF_UP, Decimal
+
 from django.core.exceptions import ValidationError
 from django.db import models
 from simple_history.models import HistoricalRecords
 
 from apps.catalogo.models import TipoEquipo, Ubicacion
+
+RUT_CON_PUNTOS_RE = re.compile(r"^\d{1,3}(\.\d{3})*-[\dkK]$")
+RUT_SIN_PUNTOS_RE = re.compile(r"^\d{7,8}-[\dkK]$")
+CLP_QUANTIZER = Decimal("1")
+
+
+class Proveedor(models.Model):
+    """Proveedor asociado a órdenes de compra."""
+
+    razon_social = models.CharField(max_length=200)
+    rut = models.CharField(max_length=20, unique=True)
+    direccion = models.CharField(max_length=255, blank=True)
+    ciudad = models.CharField(max_length=120, blank=True)
+    contacto_nombre = models.CharField(max_length=160, blank=True)
+    contacto_telefono = models.CharField(max_length=80, blank=True)
+    email = models.EmailField(blank=True)
+    activo = models.BooleanField(default=True)
+    created_at = models.DateTimeField(auto_now_add=True)
+    updated_at = models.DateTimeField(auto_now=True)
+    history = HistoricalRecords(
+        verbose_name="historical proveedor",
+        verbose_name_plural="historical proveedores",
+    )
+
+    class Meta:
+        verbose_name = "proveedor"
+        verbose_name_plural = "proveedores"
+        ordering = ["razon_social", "rut"]
+
+    def __str__(self) -> str:
+        return f"{self.razon_social} ({self.rut})"
+
+    def save(self, *args, **kwargs):
+        self.full_clean()
+        super().save(*args, **kwargs)
+
+    def clean(self):
+        super().clean()
+        if not self.rut:
+            return
+
+        rut = self.rut.strip()
+        if RUT_SIN_PUNTOS_RE.fullmatch(rut):
+            cuerpo, dv = rut.split("-")
+            grupos = []
+            while cuerpo:
+                grupos.insert(0, cuerpo[-3:])
+                cuerpo = cuerpo[:-3]
+            rut = f"{'.'.join(grupos)}-{dv.upper()}"
+        elif RUT_CON_PUNTOS_RE.fullmatch(rut):
+            cuerpo, dv = rut.rsplit("-", 1)
+            rut = f"{cuerpo}-{dv.upper()}"
+        else:
+            raise ValidationError(
+                {"rut": "Ingrese un RUT chileno válido, con o sin puntos."}
+            )
+
+        self.rut = rut
 
 
 class OrdenCompra(models.Model):
@@ -17,9 +78,30 @@ class OrdenCompra(models.Model):
     ESTADOS_EDITABLES = {Estado.BORRADOR}
 
     numero = models.CharField(max_length=80, unique=True)
-    proveedor = models.CharField(max_length=160, blank=True)
+    proveedor = models.ForeignKey(
+        Proveedor,
+        on_delete=models.PROTECT,
+        null=True,
+        blank=True,
+        related_name="ordenes_compra",
+    )
+    numero_inacap = models.CharField(max_length=40, blank=True)
     numero_documento = models.CharField(max_length=80, blank=True)
     fecha_documento = models.DateField(null=True, blank=True)
+    fecha_publicacion = models.DateField(null=True, blank=True)
+    fecha_emision = models.DateField(null=True, blank=True)
+    sede_destino = models.CharField(max_length=120, blank=True)
+    direccion_despacho = models.CharField(max_length=255, blank=True)
+    recibido_por_nombre = models.CharField(max_length=160, blank=True)
+    comprador_nombre = models.CharField(max_length=160, blank=True)
+    referencia_pedido = models.CharField(max_length=80, blank=True)
+    codigo_inversion = models.CharField(max_length=80, blank=True)
+    tasa_iva = models.DecimalField(
+        max_digits=5,
+        decimal_places=2,
+        default=Decimal("19"),
+    )
+    descuentos = models.DecimalField(max_digits=12, decimal_places=2, default=0)
     estado = models.CharField(
         max_length=12,
         choices=Estado.choices,
@@ -67,6 +149,29 @@ class OrdenCompra(models.Model):
             models.Q(cantidad_recibida__lt=models.F("cantidad_solicitada"))
         ).exists()
 
+    @property
+    def subtotal_neto(self) -> Decimal:
+        return sum((item.total_linea for item in self.items.all()), Decimal("0"))
+
+    @property
+    def monto_afecto(self) -> Decimal:
+        return self.subtotal_neto - (self.descuentos or Decimal("0"))
+
+    @property
+    def iva(self) -> Decimal:
+        tasa_iva = self.tasa_iva or Decimal("0")
+        return ((self.monto_afecto * tasa_iva) / Decimal("100")).quantize(
+            CLP_QUANTIZER,
+            rounding=ROUND_HALF_UP,
+        )
+
+    @property
+    def total_general(self) -> Decimal:
+        return (self.monto_afecto + self.iva).quantize(
+            CLP_QUANTIZER,
+            rounding=ROUND_HALF_UP,
+        )
+
 
 class ItemOrdenCompra(models.Model):
     """
@@ -76,6 +181,8 @@ class ItemOrdenCompra(models.Model):
     - cantidad_recibida:   lo que llegó físicamente (0..cantidad_solicitada).
     - codigos_activo:      lista de códigos de activo, solo para equipos SERIE;
                            len debe coincidir con cantidad_recibida al aceptar.
+    - total_linea:         usa la cantidad SOLICITADA (pedido/cotizado), no la
+                           cantidad recibida.
     """
 
     orden_compra = models.ForeignKey(
@@ -87,6 +194,13 @@ class ItemOrdenCompra(models.Model):
         TipoEquipo,
         on_delete=models.PROTECT,
         related_name="items_orden_compra",
+    )
+    codigo_material = models.CharField(max_length=40, blank=True)
+    unidad_medida = models.CharField(max_length=20, blank=True, default="UNI")
+    precio_unitario = models.DecimalField(
+        max_digits=12,
+        decimal_places=2,
+        default=0,
     )
     cantidad_solicitada = models.PositiveIntegerField()
     cantidad_recibida = models.PositiveIntegerField(default=0)
@@ -166,3 +280,10 @@ class ItemOrdenCompra(models.Model):
     @property
     def pendiente(self) -> int:
         return self.cantidad_solicitada - self.cantidad_recibida
+
+    @property
+    def total_linea(self) -> Decimal:
+        """Total neto usando cantidad_solicitada, no cantidad_recibida."""
+        return (self.precio_unitario or Decimal("0")) * Decimal(
+            self.cantidad_solicitada or 0
+        )

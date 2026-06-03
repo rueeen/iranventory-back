@@ -31,7 +31,7 @@ def tipo_granel(db):
 
 @pytest.fixture
 def oc(db):
-    return OrdenCompra.objects.create(numero="OC-2026-001", proveedor="Proveedor SA")
+    return OrdenCompra.objects.create(numero="OC-2026-001")
 
 
 # ──────────────────────────── flujo básico ────────────────────────────────────
