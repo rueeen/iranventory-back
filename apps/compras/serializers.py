@@ -35,6 +35,13 @@ class ProveedorSerializer(serializers.ModelSerializer):
 
 
 class ItemOrdenCompraSerializer(serializers.ModelSerializer):
+    orden_compra = serializers.PrimaryKeyRelatedField(read_only=True)
+    orden_compra_id = serializers.PrimaryKeyRelatedField(
+        queryset=OrdenCompra.objects.all(),
+        source="orden_compra",
+        write_only=True,
+        required=False,
+    )
     tipo_equipo = TipoEquipoSerializer(read_only=True)
     tipo_equipo_id = serializers.PrimaryKeyRelatedField(
         queryset=TipoEquipo.objects.all(),
@@ -60,6 +67,8 @@ class ItemOrdenCompraSerializer(serializers.ModelSerializer):
         model = ItemOrdenCompra
         fields = [
             "id",
+            "orden_compra",
+            "orden_compra_id",
             "tipo_equipo",
             "tipo_equipo_id",
             "codigo_material",
