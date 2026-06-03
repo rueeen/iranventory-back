@@ -103,6 +103,32 @@ class PrestamoSerializer(serializers.ModelSerializer):
             "motivo_rechazo",
         ]
 
+    def validate(self, attrs):
+        fecha_requerida = attrs.get(
+            "fecha_requerida",
+            getattr(self.instance, "fecha_requerida", None),
+        )
+        fecha_devolucion_comprometida = attrs.get(
+            "fecha_devolucion_comprometida",
+            getattr(self.instance, "fecha_devolucion_comprometida", None),
+        )
+
+        if (
+            fecha_requerida
+            and fecha_devolucion_comprometida
+            and fecha_devolucion_comprometida < fecha_requerida
+        ):
+            raise serializers.ValidationError(
+                {
+                    "fecha_devolucion_comprometida": (
+                        "La fecha de devolución comprometida no puede ser anterior "
+                        "a la fecha requerida."
+                    )
+                }
+            )
+
+        return attrs
+
     def create(self, validated_data):
         detalles_data = validated_data.pop("detalles", [])
         prestamo = Prestamo.objects.create(
