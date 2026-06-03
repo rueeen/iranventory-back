@@ -5,6 +5,7 @@ from rest_framework.filters import SearchFilter
 
 from apps.cuentas.permissions import PermisoOrdenCompra
 
+from .importacion import parsear_orden_compra
 from .models import ItemOrdenCompra, OrdenCompra, Proveedor
 from .serializers import (
     ItemOrdenCompraSerializer,
@@ -61,6 +62,18 @@ class OrdenCompraViewSet(viewsets.ModelViewSet):
     def partial_update(self, request, *args, **kwargs):
         kwargs["partial"] = True
         return self.update(request, *args, **kwargs)
+
+    @decorators.action(detail=False, methods=["post"], url_path="importar-preview")
+    def importar_preview(self, request):
+        texto = request.data.get("texto", "")
+        if not isinstance(texto, str) or not texto.strip():
+            raise serializers.ValidationError(
+                {"texto": "Debe enviar el texto de la orden de compra."}
+            )
+        return response.Response(
+            parsear_orden_compra(texto),
+            status=status.HTTP_200_OK,
+        )
 
     @decorators.action(detail=True, methods=["post"], url_path="enviar-revision")
     def enviar_revision(self, request, pk=None):
