@@ -584,6 +584,70 @@ def test_entregar_prestamo_serie_revalida_situacion_y_estado(alumno, situacion, 
 
 
 @pytest.mark.django_db
+def test_api_no_crea_prestamo_con_devolucion_anterior_a_requerida(api_client, alumno):
+    api_client.force_authenticate(user=alumno)
+
+    response = api_client.post(
+        "/api/prestamos/",
+        {
+            "fecha_requerida": "2026-06-10T10:00:00Z",
+            "fecha_devolucion_comprometida": "2026-06-09T10:00:00Z",
+        },
+        format="json",
+    )
+
+    assert response.status_code == 400
+    assert Prestamo.objects.count() == 0
+    assert "no puede ser anterior" in response.data["fecha_devolucion_comprometida"][0]
+
+
+@pytest.mark.django_db
+def test_api_crea_prestamo_con_devolucion_igual_o_posterior_a_requerida(
+    api_client, alumno
+):
+    api_client.force_authenticate(user=alumno)
+
+    response = api_client.post(
+        "/api/prestamos/",
+        {
+            "fecha_requerida": "2026-06-10T10:00:00Z",
+            "fecha_devolucion_comprometida": "2026-06-12T10:00:00Z",
+        },
+        format="json",
+    )
+
+    assert response.status_code == 201
+    prestamo = Prestamo.objects.get()
+    assert prestamo.solicitante == alumno
+    assert prestamo.estado == Prestamo.Estado.SOLICITADA
+
+
+@pytest.mark.django_db
+def test_api_no_actualiza_prestamo_con_devolucion_anterior_a_requerida(
+    api_client, alumno, panolero
+):
+    prestamo = Prestamo.objects.create(
+        solicitante=alumno,
+        fecha_requerida="2026-06-10T10:00:00Z",
+        fecha_devolucion_comprometida="2026-06-12T10:00:00Z",
+    )
+    api_client.force_authenticate(user=panolero)
+
+    response = api_client.patch(
+        f"/api/prestamos/{prestamo.id}/",
+        {"fecha_devolucion_comprometida": "2026-06-09T10:00:00Z"},
+        format="json",
+    )
+
+    prestamo.refresh_from_db()
+    assert response.status_code == 400
+    assert "no puede ser anterior" in response.data["fecha_devolucion_comprometida"][0]
+    assert prestamo.fecha_devolucion_comprometida.isoformat().startswith(
+        "2026-06-12T10:00:00"
+    )
+
+
+@pytest.mark.django_db
 def test_api_permite_editar_detalles_en_estado_solicitada(api_client, alumno, panolero):
     tipo_equipo = TipoEquipo.objects.create(
         nombre="Resistencias",
