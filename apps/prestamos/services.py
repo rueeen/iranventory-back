@@ -61,12 +61,24 @@ def preparar_prestamo(prestamo: Prestamo, usuario=None) -> Prestamo:
                     f"estado: {unidad.get_estado_display()}, "
                     f"requiere revisión: {'sí' if unidad.requiere_revision else 'no'})."
                 )
-        elif detalle.tipo_equipo.stock_granel < detalle.cantidad:
-            raise ValidationError(
-                "No se puede preparar el préstamo porque no hay stock suficiente "
-                f"para {detalle.tipo_equipo}: solicitado {detalle.cantidad}, "
-                f"disponible {detalle.tipo_equipo.stock_granel}."
+            unidad.situacion = Unidad.Situacion.RESERVADA
+            unidad.save(update_fields=["situacion"])
+        else:
+            actualizadas = (
+                TipoEquipo.objects.select_for_update()
+                .filter(
+                    pk=detalle.tipo_equipo_id,
+                    stock_granel__gte=detalle.cantidad,
+                )
+                .update(stock_granel=F("stock_granel") - detalle.cantidad)
             )
+            if actualizadas != 1:
+                tipo_equipo = TipoEquipo.objects.get(pk=detalle.tipo_equipo_id)
+                raise ValidationError(
+                    "No se puede preparar el préstamo porque no hay stock suficiente "
+                    f"para {tipo_equipo}: solicitado {detalle.cantidad}, "
+                    f"disponible {tipo_equipo.stock_granel}."
+                )
 
     prestamo.estado = Prestamo.Estado.PREPARADA
     prestamo.preparado_por = usuario
@@ -86,26 +98,15 @@ def entregar_prestamo(prestamo: Prestamo, usuario=None) -> Prestamo:
         if detalle.tipo_equipo.tipo_seguimiento == TipoEquipo.TipoSeguimiento.SERIE:
             unidad = Unidad.objects.select_for_update().get(pk=detalle.unidad_id)
             if (
-                unidad.situacion != Unidad.Situacion.DISPONIBLE
+                unidad.situacion != Unidad.Situacion.RESERVADA
                 or unidad.estado != Unidad.Estado.BUENO
                 or unidad.requiere_revision
             ):
-                raise ValidationError(f"La unidad {unidad} ya no está disponible.")
+                raise ValidationError(
+                    f"La unidad {unidad} ya no está reservada y disponible para entrega."
+                )
             unidad.situacion = Unidad.Situacion.PRESTADA
             unidad.save(update_fields=["situacion"])
-        else:
-            actualizadas = (
-                TipoEquipo.objects.select_for_update()
-                .filter(
-                    pk=detalle.tipo_equipo_id,
-                    stock_granel__gte=detalle.cantidad,
-                )
-                .update(stock_granel=F("stock_granel") - detalle.cantidad)
-            )
-            if actualizadas != 1:
-                raise ValidationError(
-                    f"No hay stock granel suficiente para {detalle.tipo_equipo}."
-                )
 
     prestamo.estado = Prestamo.Estado.ENTREGADA
     prestamo.entregado_por = usuario
@@ -199,9 +200,7 @@ def cerrar_prestamo(prestamo: Prestamo, usuario=None) -> Prestamo:
                 unidad.estado = Unidad.Estado.BUENO
                 unidad.situacion = Unidad.Situacion.DISPONIBLE
                 unidad.requiere_revision = False
-            unidad.save(
-                update_fields=["estado", "situacion", "requiere_revision"]
-            )
+            unidad.save(update_fields=["estado", "situacion", "requiere_revision"])
         elif detalle.cantidad_devuelta:
             TipoEquipo.objects.select_for_update().filter(
                 pk=detalle.tipo_equipo_id
