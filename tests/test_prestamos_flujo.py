@@ -1,6 +1,7 @@
 import pytest
 from django.contrib.auth import get_user_model
 from django.core.exceptions import ValidationError
+from model_bakery import baker
 from rest_framework.test import APIClient
 
 from apps.catalogo.models import TipoEquipo
@@ -38,6 +39,279 @@ def panolero():
 @pytest.fixture
 def api_client():
     return APIClient()
+
+
+def _tipo_serie(nombre="Equipo serie"):
+    return baker.make(
+        TipoEquipo,
+        nombre=nombre,
+        tipo_seguimiento=TipoEquipo.TipoSeguimiento.SERIE,
+    )
+
+
+def _tipo_granel(nombre="Equipo granel", stock_granel=10):
+    return baker.make(
+        TipoEquipo,
+        nombre=nombre,
+        tipo_seguimiento=TipoEquipo.TipoSeguimiento.GRANEL,
+        stock_granel=stock_granel,
+    )
+
+
+def _prestamo_serie(alumno, *, unidad=None, nombre="Equipo serie"):
+    tipo_equipo = unidad.tipo_equipo if unidad else _tipo_serie(nombre)
+    unidad = unidad or baker.make(
+        Unidad,
+        tipo_equipo=tipo_equipo,
+        codigo_activo=f"SER-{tipo_equipo.id or 'X'}",
+        situacion=Unidad.Situacion.DISPONIBLE,
+        estado=Unidad.Estado.BUENO,
+    )
+    prestamo = baker.make(Prestamo, solicitante=alumno)
+    detalle = baker.make(
+        DetallePrestamo,
+        prestamo=prestamo,
+        tipo_equipo=tipo_equipo,
+        unidad=unidad,
+        cantidad=1,
+        cantidad_devuelta=0,
+        cantidad_no_devuelta=0,
+    )
+    return prestamo, detalle, tipo_equipo, unidad
+
+
+def _prestamo_granel(alumno, *, cantidad=4, stock_granel=10, nombre="Equipo granel"):
+    tipo_equipo = _tipo_granel(nombre, stock_granel)
+    prestamo = baker.make(Prestamo, solicitante=alumno)
+    detalle = baker.make(
+        DetallePrestamo,
+        prestamo=prestamo,
+        tipo_equipo=tipo_equipo,
+        cantidad=cantidad,
+        unidad=None,
+        cantidad_devuelta=0,
+        cantidad_no_devuelta=0,
+    )
+    return prestamo, detalle, tipo_equipo
+
+
+@pytest.mark.django_db
+def test_fase3a_no_aprueba_prestamo_sin_detalles(alumno):
+    prestamo = baker.make(Prestamo, solicitante=alumno)
+
+    with pytest.raises(ValidationError) as exc_info:
+        aprobar_prestamo(prestamo)
+
+    prestamo.refresh_from_db()
+    assert "al menos un detalle" in str(exc_info.value)
+    assert prestamo.estado == Prestamo.Estado.SOLICITADA
+
+
+@pytest.mark.django_db
+def test_fase3a_no_prepara_serie_si_unidad_no_esta_disponible(alumno):
+    tipo_equipo = _tipo_serie("Osciloscopio fase 3A")
+    unidad = baker.make(
+        Unidad,
+        tipo_equipo=tipo_equipo,
+        codigo_activo="F3A-NODISP",
+        situacion=Unidad.Situacion.PRESTADA,
+        estado=Unidad.Estado.BUENO,
+    )
+    prestamo, _detalle, _tipo_equipo, _unidad = _prestamo_serie(
+        alumno,
+        unidad=unidad,
+    )
+    aprobar_prestamo(prestamo)
+
+    with pytest.raises(ValidationError):
+        preparar_prestamo(prestamo)
+
+    prestamo.refresh_from_db()
+    unidad.refresh_from_db()
+    assert prestamo.estado == Prestamo.Estado.APROBADA
+    assert unidad.situacion == Unidad.Situacion.PRESTADA
+
+
+@pytest.mark.django_db
+def test_fase3a_no_prepara_serie_si_unidad_no_esta_buena(alumno):
+    tipo_equipo = _tipo_serie("Generador fase 3A")
+    unidad = baker.make(
+        Unidad,
+        tipo_equipo=tipo_equipo,
+        codigo_activo="F3A-MALO",
+        situacion=Unidad.Situacion.DISPONIBLE,
+        estado=Unidad.Estado.MALO,
+    )
+    prestamo, _detalle, _tipo_equipo, _unidad = _prestamo_serie(
+        alumno,
+        unidad=unidad,
+    )
+    aprobar_prestamo(prestamo)
+
+    with pytest.raises(ValidationError):
+        preparar_prestamo(prestamo)
+
+    prestamo.refresh_from_db()
+    unidad.refresh_from_db()
+    assert prestamo.estado == Prestamo.Estado.APROBADA
+    assert unidad.estado == Unidad.Estado.MALO
+    assert unidad.situacion == Unidad.Situacion.DISPONIBLE
+
+
+@pytest.mark.django_db
+def test_fase3a_entregar_prestamo_serie_cambia_unidad_a_prestada(alumno):
+    prestamo, _detalle, _tipo_equipo, unidad = _prestamo_serie(
+        alumno,
+        nombre="Multímetro fase 3A",
+    )
+    aprobar_prestamo(prestamo)
+    preparar_prestamo(prestamo)
+
+    entregar_prestamo(prestamo)
+
+    prestamo.refresh_from_db()
+    unidad.refresh_from_db()
+    assert prestamo.estado == Prestamo.Estado.ENTREGADA
+    assert unidad.situacion == Unidad.Situacion.PRESTADA
+
+
+@pytest.mark.django_db
+def test_fase3a_cerrar_devolucion_serie_devuelta_cambia_unidad_a_disponible(alumno):
+    prestamo, detalle, _tipo_equipo, unidad = _prestamo_serie(
+        alumno,
+        nombre="Fuente fase 3A",
+    )
+    aprobar_prestamo(prestamo)
+    preparar_prestamo(prestamo)
+    entregar_prestamo(prestamo)
+    iniciar_devolucion(prestamo)
+    detalle.cantidad_devuelta = 1
+    detalle.save(update_fields=["cantidad_devuelta"])
+
+    cerrar_prestamo(prestamo)
+
+    prestamo.refresh_from_db()
+    unidad.refresh_from_db()
+    assert prestamo.estado == Prestamo.Estado.CERRADA
+    assert unidad.situacion == Unidad.Situacion.DISPONIBLE
+
+
+@pytest.mark.django_db
+def test_fase3a_cerrar_devolucion_serie_no_devuelta_cambia_unidad_a_baja(alumno):
+    prestamo, detalle, _tipo_equipo, unidad = _prestamo_serie(
+        alumno,
+        nombre="Pinza amperimétrica fase 3A",
+    )
+    aprobar_prestamo(prestamo)
+    preparar_prestamo(prestamo)
+    entregar_prestamo(prestamo)
+    iniciar_devolucion(prestamo)
+    detalle.cantidad_no_devuelta = 1
+    detalle.save(update_fields=["cantidad_no_devuelta"])
+
+    cerrar_prestamo(prestamo)
+
+    prestamo.refresh_from_db()
+    unidad.refresh_from_db()
+    assert prestamo.estado == Prestamo.Estado.CERRADA
+    assert unidad.situacion == Unidad.Situacion.BAJA
+
+
+@pytest.mark.django_db
+def test_fase3a_entregar_prestamo_granel_descuenta_stock(alumno):
+    prestamo, _detalle, tipo_equipo = _prestamo_granel(
+        alumno,
+        cantidad=4,
+        stock_granel=10,
+        nombre="Cables fase 3A",
+    )
+    aprobar_prestamo(prestamo)
+    preparar_prestamo(prestamo)
+
+    entregar_prestamo(prestamo)
+
+    prestamo.refresh_from_db()
+    tipo_equipo.refresh_from_db()
+    assert prestamo.estado == Prestamo.Estado.ENTREGADA
+    assert tipo_equipo.stock_granel == 6
+
+
+@pytest.mark.django_db
+def test_fase3a_cerrar_devolucion_granel_repone_solo_cantidad_devuelta(alumno):
+    prestamo, detalle, tipo_equipo = _prestamo_granel(
+        alumno,
+        cantidad=5,
+        stock_granel=10,
+        nombre="Conectores fase 3A",
+    )
+    aprobar_prestamo(prestamo)
+    preparar_prestamo(prestamo)
+    entregar_prestamo(prestamo)
+    iniciar_devolucion(prestamo)
+    detalle.cantidad_devuelta = 2
+    detalle.cantidad_no_devuelta = 3
+    detalle.save(update_fields=["cantidad_devuelta", "cantidad_no_devuelta"])
+
+    cerrar_prestamo(prestamo)
+
+    prestamo.refresh_from_db()
+    tipo_equipo.refresh_from_db()
+    assert prestamo.estado == Prestamo.Estado.CERRADA
+    assert tipo_equipo.stock_granel == 7
+
+
+@pytest.mark.django_db
+def test_fase3a_no_permite_saltar_estado_entregando_sin_preparar(alumno):
+    prestamo, _detalle, _tipo_equipo, unidad = _prestamo_serie(
+        alumno,
+        nombre="Analizador fase 3A",
+    )
+    aprobar_prestamo(prestamo)
+
+    with pytest.raises(ValidationError) as exc_info:
+        entregar_prestamo(prestamo)
+
+    prestamo.refresh_from_db()
+    unidad.refresh_from_db()
+    assert "preparados" in str(exc_info.value)
+    assert prestamo.estado == Prestamo.Estado.APROBADA
+    assert unidad.situacion == Unidad.Situacion.DISPONIBLE
+
+
+@pytest.mark.django_db
+def test_fase3a_no_permite_editar_detalles_cuando_prestamo_esta_aprobada(
+    api_client,
+    alumno,
+    panolero,
+):
+    prestamo, detalle, tipo_equipo = _prestamo_granel(
+        alumno,
+        cantidad=1,
+        stock_granel=10,
+        nombre="Resistencias fase 3A",
+    )
+    aprobar_prestamo(prestamo, panolero)
+    api_client.force_authenticate(user=panolero)
+
+    response = api_client.patch(
+        f"/api/prestamos/{prestamo.id}/",
+        {
+            "detalles": [
+                {
+                    "tipo_equipo_id": tipo_equipo.id,
+                    "cantidad": 2,
+                }
+            ],
+        },
+        format="json",
+    )
+
+    detalle.refresh_from_db()
+    prestamo.refresh_from_db()
+    assert response.status_code == 400
+    assert "solo pueden modificarse" in str(response.data["detalles"])
+    assert prestamo.estado == Prestamo.Estado.APROBADA
+    assert detalle.cantidad == 1
 
 
 @pytest.mark.django_db
