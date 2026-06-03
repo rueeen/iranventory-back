@@ -68,3 +68,19 @@ def test_stock_disponible_por_serie_solo_cuenta_unidades_disponibles_y_buenas():
     )
 
     assert tipo_equipo.stock_disponible == 1
+
+
+@pytest.mark.django_db
+def test_stock_disponible_por_serie_excluye_unidades_que_requieren_revision():
+    tipo_equipo = TipoEquipo.objects.create(
+        nombre="Analizador lógico",
+        tipo_seguimiento=TipoEquipo.TipoSeguimiento.SERIE,
+    )
+    Unidad.objects.create(tipo_equipo=tipo_equipo, codigo_activo="ANL-001")
+    Unidad.objects.create(
+        tipo_equipo=tipo_equipo,
+        codigo_activo="ANL-002",
+        requiere_revision=True,
+    )
+
+    assert tipo_equipo.stock_disponible == 1

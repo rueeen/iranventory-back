@@ -99,7 +99,7 @@ class ItemOrdenCompraViewSet(viewsets.ModelViewSet):
         except OrdenCompra.DoesNotExist:
             raise serializers.ValidationError(
                 {"orden_compra": "La orden de compra indicada no existe."}
-            )
+            ) from None
         if not oc.es_editable:
             raise serializers.ValidationError(
                 f"La orden {oc.numero} está en estado '{oc.get_estado_display()}'"

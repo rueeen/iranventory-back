@@ -490,6 +490,27 @@ def test_flujo_prestamo_granel_descuenta_y_repone_al_devolver(alumno):
 
 
 @pytest.mark.django_db
+def test_preparar_prestamo_serie_rechaza_unidad_que_requiere_revision(alumno):
+    tipo_equipo = TipoEquipo.objects.create(nombre="Fuente DC")
+    unidad = Unidad.objects.create(
+        tipo_equipo=tipo_equipo,
+        codigo_activo="FDC-001",
+        requiere_revision=True,
+    )
+    prestamo = Prestamo.objects.create(solicitante=alumno)
+    DetallePrestamo.objects.create(
+        prestamo=prestamo,
+        tipo_equipo=tipo_equipo,
+        unidad=unidad,
+    )
+
+    aprobar_prestamo(prestamo)
+
+    with pytest.raises(ValidationError):
+        preparar_prestamo(prestamo)
+
+
+@pytest.mark.django_db
 @pytest.mark.parametrize("estado", [Unidad.Estado.REPARABLE, Unidad.Estado.MALO])
 def test_preparar_prestamo_serie_rechaza_unidad_disponible_no_buena(alumno, estado):
     tipo_equipo = TipoEquipo.objects.create(nombre=f"Generador {estado}")
@@ -509,6 +530,26 @@ def test_preparar_prestamo_serie_rechaza_unidad_disponible_no_buena(alumno, esta
 
     with pytest.raises(ValidationError):
         preparar_prestamo(prestamo)
+
+
+@pytest.mark.django_db
+def test_entregar_prestamo_serie_rechaza_unidad_que_requiere_revision(alumno):
+    tipo_equipo = TipoEquipo.objects.create(nombre="Calibrador")
+    unidad = Unidad.objects.create(tipo_equipo=tipo_equipo, codigo_activo="CAL-001")
+    prestamo = Prestamo.objects.create(solicitante=alumno)
+    DetallePrestamo.objects.create(
+        prestamo=prestamo,
+        tipo_equipo=tipo_equipo,
+        unidad=unidad,
+    )
+
+    aprobar_prestamo(prestamo)
+    preparar_prestamo(prestamo)
+    unidad.requiere_revision = True
+    unidad.save(update_fields=["requiere_revision"])
+
+    with pytest.raises(ValidationError):
+        entregar_prestamo(prestamo)
 
 
 @pytest.mark.django_db

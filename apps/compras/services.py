@@ -8,7 +8,6 @@ from apps.inventario.models import Unidad
 
 from .models import ItemOrdenCompra, OrdenCompra
 
-
 # ──────────────────────────── número correlativo ──────────────────────────────
 
 def _siguiente_numero_oc(year: int) -> str:
