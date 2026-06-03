@@ -1,4 +1,6 @@
-from rest_framework import viewsets
+from django_filters import rest_framework as filters
+from rest_framework import mixins, viewsets
+from rest_framework.filters import SearchFilter
 from rest_framework.generics import CreateAPIView, RetrieveUpdateAPIView
 from rest_framework.permissions import (
     SAFE_METHODS,
@@ -39,9 +41,12 @@ class UsuarioPermiso(BasePermission):
         return request.user.rol == Usuario.Rol.DIRECTOR
 
 
-class UsuarioViewSet(viewsets.ReadOnlyModelViewSet):
+class UsuarioViewSet(mixins.UpdateModelMixin, viewsets.ReadOnlyModelViewSet):
     queryset = Usuario.objects.all().order_by("username")
     permission_classes = [UsuarioPermiso]
+    filter_backends = [filters.DjangoFilterBackend, SearchFilter]
+    filterset_fields = ["rol"]
+    search_fields = ["username", "email", "first_name", "last_name", "rut"]
     http_method_names = ["get", "patch", "head", "options"]
 
     def get_serializer_class(self):
