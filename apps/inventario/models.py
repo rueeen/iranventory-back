@@ -12,6 +12,7 @@ class Unidad(models.Model):
 
     class Situacion(models.TextChoices):
         DISPONIBLE = "DISPONIBLE", "Disponible"
+        RESERVADA = "RESERVADA", "Reservada"
         PRESTADA = "PRESTADA", "Prestada"
         REPARACION = "REPARACION", "En reparación"
         BAJA = "BAJA", "De baja"

@@ -159,6 +159,57 @@ def test_fase3a_no_prepara_serie_si_unidad_no_esta_buena(alumno):
 
 
 @pytest.mark.django_db
+def test_preparar_prestamo_serie_reserva_unidad(alumno):
+    prestamo, _detalle, _tipo_equipo, unidad = _prestamo_serie(
+        alumno,
+        nombre="Multímetro reserva",
+    )
+    aprobar_prestamo(prestamo)
+
+    preparar_prestamo(prestamo)
+
+    prestamo.refresh_from_db()
+    unidad.refresh_from_db()
+    assert prestamo.estado == Prestamo.Estado.PREPARADA
+    assert unidad.situacion == Unidad.Situacion.RESERVADA
+    assert unidad.tipo_equipo.stock_disponible == 0
+
+
+@pytest.mark.django_db
+def test_no_prepara_dos_prestamos_con_la_misma_unidad_reservada(alumno):
+    tipo_equipo = _tipo_serie("Osciloscopio reserva duplicada")
+    unidad = baker.make(
+        Unidad,
+        tipo_equipo=tipo_equipo,
+        codigo_activo="RES-DUP-001",
+        situacion=Unidad.Situacion.DISPONIBLE,
+        estado=Unidad.Estado.BUENO,
+    )
+    primer_prestamo, _detalle, _tipo_equipo, _unidad = _prestamo_serie(
+        alumno,
+        unidad=unidad,
+    )
+    segundo_prestamo, _detalle2, _tipo_equipo2, _unidad2 = _prestamo_serie(
+        alumno,
+        unidad=unidad,
+    )
+    aprobar_prestamo(primer_prestamo)
+    aprobar_prestamo(segundo_prestamo)
+    preparar_prestamo(primer_prestamo)
+
+    with pytest.raises(ValidationError) as exc_info:
+        preparar_prestamo(segundo_prestamo)
+
+    primer_prestamo.refresh_from_db()
+    segundo_prestamo.refresh_from_db()
+    unidad.refresh_from_db()
+    assert "no está disponible" in str(exc_info.value)
+    assert primer_prestamo.estado == Prestamo.Estado.PREPARADA
+    assert segundo_prestamo.estado == Prestamo.Estado.APROBADA
+    assert unidad.situacion == Unidad.Situacion.RESERVADA
+
+
+@pytest.mark.django_db
 def test_fase3a_entregar_prestamo_serie_cambia_unidad_a_prestada(alumno):
     prestamo, _detalle, _tipo_equipo, unidad = _prestamo_serie(
         alumno,
@@ -234,6 +285,63 @@ def test_fase3a_entregar_prestamo_granel_descuenta_stock(alumno):
     tipo_equipo.refresh_from_db()
     assert prestamo.estado == Prestamo.Estado.ENTREGADA
     assert tipo_equipo.stock_granel == 6
+
+
+@pytest.mark.django_db
+def test_preparar_prestamo_granel_descuenta_stock_y_entrega_no_descuenta_de_nuevo(
+    alumno,
+):
+    prestamo, _detalle, tipo_equipo = _prestamo_granel(
+        alumno,
+        cantidad=4,
+        stock_granel=10,
+        nombre="Cables reserva granel",
+    )
+    aprobar_prestamo(prestamo)
+
+    preparar_prestamo(prestamo)
+    tipo_equipo.refresh_from_db()
+    assert tipo_equipo.stock_granel == 6
+
+    entregar_prestamo(prestamo)
+
+    prestamo.refresh_from_db()
+    tipo_equipo.refresh_from_db()
+    assert prestamo.estado == Prestamo.Estado.ENTREGADA
+    assert tipo_equipo.stock_granel == 6
+
+
+@pytest.mark.django_db
+def test_no_prepara_granel_si_stock_quedo_reservado_por_otro_prestamo(alumno):
+    tipo_equipo = _tipo_granel("Resistencias reserva duplicada", stock_granel=5)
+    primer_prestamo = baker.make(Prestamo, solicitante=alumno)
+    segundo_prestamo = baker.make(Prestamo, solicitante=alumno)
+    baker.make(
+        DetallePrestamo,
+        prestamo=primer_prestamo,
+        tipo_equipo=tipo_equipo,
+        cantidad=4,
+        unidad=None,
+    )
+    baker.make(
+        DetallePrestamo,
+        prestamo=segundo_prestamo,
+        tipo_equipo=tipo_equipo,
+        cantidad=2,
+        unidad=None,
+    )
+    aprobar_prestamo(primer_prestamo)
+    aprobar_prestamo(segundo_prestamo)
+    preparar_prestamo(primer_prestamo)
+
+    with pytest.raises(ValidationError) as exc_info:
+        preparar_prestamo(segundo_prestamo)
+
+    segundo_prestamo.refresh_from_db()
+    tipo_equipo.refresh_from_db()
+    assert "stock suficiente" in str(exc_info.value)
+    assert segundo_prestamo.estado == Prestamo.Estado.APROBADA
+    assert tipo_equipo.stock_granel == 1
 
 
 @pytest.mark.django_db
@@ -789,7 +897,9 @@ def test_api_registrar_devolucion_guarda_cantidades_sin_cerrar(
 
     get_response = api_client.get(f"/api/prestamos/{prestamo.id}/")
     assert get_response.status_code == 200
-    assert get_response.data["detalles"][0]["condicion_devolucion"] == Unidad.Estado.MALO
+    assert (
+        get_response.data["detalles"][0]["condicion_devolucion"] == Unidad.Estado.MALO
+    )
 
     cerrar_prestamo(prestamo, panolero)
     tipo_equipo.refresh_from_db()
