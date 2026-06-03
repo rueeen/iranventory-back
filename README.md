@@ -79,3 +79,28 @@ actual debe documentarse e implementarse por separado.
    ruff check .
    python manage.py makemigrations --check --dry-run
    ```
+
+## Datos demo para test alpha
+
+El proyecto incluye un seed idempotente para poblar datos mínimos de prueba en
+entornos locales o de test alpha. Estos datos son únicamente demostrativos y no
+deben cargarse en producción porque crean usuarios con una contraseña conocida.
+
+Ejecutar después de aplicar migraciones:
+
+```bash
+python manage.py seed_alpha
+```
+
+El comando crea o actualiza usuarios, catálogo base, tipos de equipo, unidades,
+préstamos en distintos estados y órdenes de compra demo sin duplicar usuarios ni
+códigos de activo si se ejecuta más de una vez.
+
+Credenciales demo:
+
+| Usuario | Rol | Password |
+| --- | --- | --- |
+| `alumno_alpha` | `ALUMNO` | `Alpha12345` |
+| `docente_alpha` | `DOCENTE` | `Alpha12345` |
+| `panolero_alpha` | `PANOLERO` | `Alpha12345` |
+| `director_alpha` | `DIRECTOR` | `Alpha12345` |
