@@ -144,6 +144,7 @@ def registrar_devolucion(prestamo: Prestamo, detalles: list[dict]) -> Prestamo:
 
         cantidad_devuelta = detalle_data["cantidad_devuelta"]
         cantidad_no_devuelta = detalle_data["cantidad_no_devuelta"]
+        condicion = detalle_data.get("condicion", Unidad.Estado.BUENO)
         if cantidad_devuelta + cantidad_no_devuelta > detalle.cantidad:
             raise ValidationError(
                 "La suma devuelta y no devuelta no puede superar "
@@ -152,8 +153,15 @@ def registrar_devolucion(prestamo: Prestamo, detalles: list[dict]) -> Prestamo:
 
         detalle.cantidad_devuelta = cantidad_devuelta
         detalle.cantidad_no_devuelta = cantidad_no_devuelta
+        detalle.condicion_devolucion = condicion
         detalle.full_clean()
-        detalle.save(update_fields=["cantidad_devuelta", "cantidad_no_devuelta"])
+        detalle.save(
+            update_fields=[
+                "cantidad_devuelta",
+                "cantidad_no_devuelta",
+                "condicion_devolucion",
+            ]
+        )
 
     return prestamo
 
@@ -176,9 +184,21 @@ def cerrar_prestamo(prestamo: Prestamo, usuario=None) -> Prestamo:
             unidad = Unidad.objects.select_for_update().get(pk=detalle.unidad_id)
             if detalle.cantidad_no_devuelta:
                 unidad.situacion = Unidad.Situacion.BAJA
+            elif detalle.condicion_devolucion == Unidad.Estado.REPARABLE:
+                unidad.estado = Unidad.Estado.REPARABLE
+                unidad.situacion = Unidad.Situacion.REPARACION
+                unidad.requiere_revision = True
+            elif detalle.condicion_devolucion == Unidad.Estado.MALO:
+                unidad.estado = Unidad.Estado.MALO
+                unidad.situacion = Unidad.Situacion.BAJA
+                unidad.requiere_revision = True
             else:
+                unidad.estado = Unidad.Estado.BUENO
                 unidad.situacion = Unidad.Situacion.DISPONIBLE
-            unidad.save(update_fields=["situacion"])
+                unidad.requiere_revision = False
+            unidad.save(
+                update_fields=["estado", "situacion", "requiere_revision"]
+            )
         elif detalle.cantidad_devuelta:
             TipoEquipo.objects.select_for_update().filter(
                 pk=detalle.tipo_equipo_id

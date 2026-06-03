@@ -44,6 +44,10 @@ class RegistrarDevolucionDetalleSerializer(serializers.Serializer):
     id = serializers.IntegerField()
     cantidad_devuelta = serializers.IntegerField(min_value=0)
     cantidad_no_devuelta = serializers.IntegerField(min_value=0)
+    condicion = serializers.ChoiceField(
+        choices=Unidad.Estado.choices,
+        default=Unidad.Estado.BUENO,
+    )
 
 
 class RegistrarDevolucionSerializer(serializers.Serializer):

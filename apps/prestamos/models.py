@@ -105,6 +105,12 @@ class DetallePrestamo(models.Model):
     cantidad = models.PositiveIntegerField(default=1)
     cantidad_devuelta = models.PositiveIntegerField(default=0)
     cantidad_no_devuelta = models.PositiveIntegerField(default=0)
+    condicion_devolucion = models.CharField(
+        max_length=10,
+        choices=Unidad.Estado.choices,
+        default=Unidad.Estado.BUENO,
+        blank=True,
+    )
     observaciones = models.TextField(blank=True)
     history = HistoricalRecords(
         verbose_name="historical detalle de préstamo",
