@@ -10,7 +10,6 @@ from apps.compras.models import ItemOrdenCompra, OrdenCompra
 from apps.compras.services import aceptar_orden_compra, enviar_revision
 from apps.inventario.models import Unidad
 
-
 # ──────────────────────────── fixtures ────────────────────────────────────────
 
 @pytest.fixture

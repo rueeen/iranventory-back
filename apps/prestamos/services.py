@@ -52,12 +52,14 @@ def preparar_prestamo(prestamo: Prestamo, usuario=None) -> Prestamo:
             if (
                 unidad.situacion != Unidad.Situacion.DISPONIBLE
                 or unidad.estado != Unidad.Estado.BUENO
+                or unidad.requiere_revision
             ):
                 raise ValidationError(
                     "No se puede preparar el préstamo porque la unidad "
                     f"{unidad} de {detalle.tipo_equipo} no está disponible "
                     f"(situación: {unidad.get_situacion_display()}, "
-                    f"estado: {unidad.get_estado_display()})."
+                    f"estado: {unidad.get_estado_display()}, "
+                    f"requiere revisión: {'sí' if unidad.requiere_revision else 'no'})."
                 )
         elif detalle.tipo_equipo.stock_granel < detalle.cantidad:
             raise ValidationError(
@@ -86,6 +88,7 @@ def entregar_prestamo(prestamo: Prestamo, usuario=None) -> Prestamo:
             if (
                 unidad.situacion != Unidad.Situacion.DISPONIBLE
                 or unidad.estado != Unidad.Estado.BUENO
+                or unidad.requiere_revision
             ):
                 raise ValidationError(f"La unidad {unidad} ya no está disponible.")
             unidad.situacion = Unidad.Situacion.PRESTADA

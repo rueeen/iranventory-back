@@ -11,7 +11,6 @@ from apps.compras.models import ItemOrdenCompra, OrdenCompra
 from apps.cuentas.models import Usuario
 from apps.inventario.models import Unidad
 
-
 # ──────────────────────────── fixtures ────────────────────────────────────────
 
 @pytest.fixture

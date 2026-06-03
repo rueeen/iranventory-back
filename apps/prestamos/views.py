@@ -12,10 +12,12 @@ from .services import (
     aprobar_prestamo,
     cerrar_prestamo,
     entregar_prestamo,
-    registrar_devolucion as registrar_devolucion_prestamo,
     iniciar_devolucion,
     preparar_prestamo,
     rechazar_prestamo,
+)
+from .services import (
+    registrar_devolucion as registrar_devolucion_prestamo,
 )
 
 
