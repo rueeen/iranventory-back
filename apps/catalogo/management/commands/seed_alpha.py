@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
+from decimal import Decimal
 from typing import Any
 
 from django.contrib.auth import get_user_model
@@ -11,7 +12,7 @@ from django.db import transaction
 from django.utils import timezone
 
 from apps.catalogo.models import Asignatura, Carrera, Categoria, TipoEquipo, Ubicacion
-from apps.compras.models import ItemOrdenCompra, OrdenCompra
+from apps.compras.models import ItemOrdenCompra, OrdenCompra, Proveedor
 from apps.cuentas.models import Usuario
 from apps.inventario.models import Unidad
 from apps.prestamos.models import DetallePrestamo, Prestamo
@@ -372,6 +373,19 @@ class Command(BaseCommand):
     def _seed_compras(self, catalogo: dict[str, Any]) -> SeedResult:
         panolero = Usuario.objects.get(username="panolero_alpha")
         director = Usuario.objects.get(username="director_alpha")
+        proveedor_demo, created = Proveedor.objects.update_or_create(
+            rut="76.269.680-0",
+            defaults={
+                "razon_social": "Proveedor Demo Alpha",
+                "direccion": "Av. Demo 123",
+                "ciudad": "Santiago",
+                "contacto_nombre": "Contacto Demo",
+                "contacto_telefono": "+56 9 0000 0000",
+                "email": "demo@proveedor-alpha.cl",
+                "activo": True,
+            },
+        )
+
         compras = [
             (
                 "OC-ALPHA-BORRADOR",
@@ -379,8 +393,8 @@ class Command(BaseCommand):
                 panolero,
                 None,
                 [
-                    (catalogo["cables"], 50, 0, []),
-                    (catalogo["resistencias"], 100, 0, []),
+                    (catalogo["cables"], 50, 0, [], Decimal("150")),
+                    (catalogo["resistencias"], 100, 0, [], Decimal("25")),
                 ],
             ),
             (
@@ -389,8 +403,8 @@ class Command(BaseCommand):
                 panolero,
                 director,
                 [
-                    (catalogo["cables"], 100, 40, []),
-                    (catalogo["resistencias"], 200, 80, []),
+                    (catalogo["cables"], 100, 40, [], Decimal("150")),
+                    (catalogo["resistencias"], 200, 80, [], Decimal("25")),
                 ],
             ),
             (
@@ -398,24 +412,28 @@ class Command(BaseCommand):
                 OrdenCompra.Estado.ACEPTADA,
                 panolero,
                 director,
-                [(catalogo["cables"], 30, 30, [])],
+                [(catalogo["cables"], 30, 30, [], Decimal("150"))],
             ),
             (
                 "OC-ALPHA-RECHAZADA",
                 OrdenCompra.Estado.RECHAZADA,
                 panolero,
                 director,
-                [(catalogo["osciloscopio"], 1, 0, [])],
+                [(catalogo["osciloscopio"], 1, 0, [], Decimal("450000"))],
             ),
         ]
 
-        result = SeedResult()
+        result = self._result(created)
         for numero, estado, creado_por, revisado_por, items in compras:
             orden, created = OrdenCompra.objects.update_or_create(
                 numero=numero,
                 defaults={
-                    "proveedor": "Proveedor Demo Alpha",
+                    "proveedor": proveedor_demo,
+                    "numero_inacap": f"INA-{numero}",
                     "numero_documento": f"DOC-{numero}",
+                    "sede_destino": "Sede Alpha",
+                    "comprador_nombre": "Comprador Demo Alpha",
+                    "tasa_iva": Decimal("19"),
                     "estado": estado,
                     "observaciones": (
                         f"{DEMO_MARKER} Orden demo {estado}. "
@@ -427,10 +445,13 @@ class Command(BaseCommand):
                 },
             )
             orden.items.all().delete()
-            for tipo_equipo, solicitada, recibida, codigos in items:
+            for tipo_equipo, solicitada, recibida, codigos, precio_unitario in items:
                 ItemOrdenCompra.objects.create(
                     orden_compra=orden,
                     tipo_equipo=tipo_equipo,
+                    codigo_material=f"DEMO-{tipo_equipo.id}",
+                    unidad_medida="UNI",
+                    precio_unitario=precio_unitario,
                     cantidad_solicitada=solicitada,
                     cantidad_recibida=recibida,
                     codigos_activo=codigos,
