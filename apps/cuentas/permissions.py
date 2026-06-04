@@ -68,6 +68,7 @@ class PrestamoPermiso(BasePermission):
         {
             "aprobar",
             "rechazar",
+            "cancelar",
             "preparar",
             "entregar",
             "iniciar_devolucion",

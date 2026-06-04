@@ -10,6 +10,7 @@ from .models import Prestamo
 from .serializers import PrestamoSerializer, RegistrarDevolucionSerializer
 from .services import (
     aprobar_prestamo,
+    cancelar_prestamo,
     cerrar_prestamo,
     entregar_prestamo,
     iniciar_devolucion,
@@ -55,6 +56,18 @@ class PrestamoViewSet(viewsets.ModelViewSet):
     def rechazar(self, request, pk=None):
         prestamo = _ejecutar_transicion(
             rechazar_prestamo,
+            self.get_object(),
+            request.user,
+            request.data.get("motivo", request.data.get("motivo_rechazo", "")),
+        )
+        return response.Response(
+            self.get_serializer(prestamo).data, status=status.HTTP_200_OK
+        )
+
+    @decorators.action(detail=True, methods=["post"])
+    def cancelar(self, request, pk=None):
+        prestamo = _ejecutar_transicion(
+            cancelar_prestamo,
             self.get_object(),
             request.user,
             request.data.get("motivo", request.data.get("motivo_rechazo", "")),

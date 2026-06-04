@@ -10,6 +10,7 @@ from apps.inventario.models import Unidad
 from apps.prestamos.models import DetallePrestamo, Prestamo
 from apps.prestamos.services import (
     aprobar_prestamo,
+    cancelar_prestamo,
     cerrar_prestamo,
     entregar_prestamo,
     iniciar_devolucion,
@@ -1030,3 +1031,169 @@ def test_api_registrar_devolucion_rechaza_suma_mayor_a_cantidad(
     assert response.status_code == 400
     assert detalle.cantidad_devuelta == 0
     assert detalle.cantidad_no_devuelta == 0
+
+
+@pytest.mark.django_db
+def test_cancelar_prestamo_preparada_libera_unidad_serie(alumno, panolero):
+    prestamo, _detalle, _tipo_equipo, unidad = _prestamo_serie(
+        alumno,
+        nombre="Multímetro cancelación preparada",
+    )
+    aprobar_prestamo(prestamo, panolero)
+    preparar_prestamo(prestamo, panolero)
+
+    cancelar_prestamo(prestamo, panolero, motivo="No retirado")
+
+    prestamo.refresh_from_db()
+    unidad.refresh_from_db()
+    assert prestamo.estado == Prestamo.Estado.CANCELADA
+    assert prestamo.motivo_rechazo == "No retirado"
+    assert unidad.situacion == Unidad.Situacion.DISPONIBLE
+
+
+@pytest.mark.django_db
+def test_cancelar_prestamo_aprobada_sin_reservas_funciona(alumno, panolero):
+    prestamo, _detalle, _tipo_equipo, unidad = _prestamo_serie(
+        alumno,
+        nombre="Multímetro cancelación aprobada",
+    )
+    aprobar_prestamo(prestamo, panolero)
+
+    cancelar_prestamo(prestamo, panolero)
+
+    prestamo.refresh_from_db()
+    unidad.refresh_from_db()
+    assert prestamo.estado == Prestamo.Estado.CANCELADA
+    assert unidad.situacion == Unidad.Situacion.DISPONIBLE
+
+
+@pytest.mark.django_db
+def test_cancelar_prestamo_preparada_granel_reintegra_stock(alumno, panolero):
+    prestamo, _detalle, tipo_equipo = _prestamo_granel(
+        alumno,
+        cantidad=4,
+        stock_granel=10,
+        nombre="Cables cancelación granel",
+    )
+    aprobar_prestamo(prestamo, panolero)
+    preparar_prestamo(prestamo, panolero)
+    tipo_equipo.refresh_from_db()
+    assert tipo_equipo.stock_granel == 6
+
+    cancelar_prestamo(prestamo, panolero)
+
+    prestamo.refresh_from_db()
+    tipo_equipo.refresh_from_db()
+    assert prestamo.estado == Prestamo.Estado.CANCELADA
+    assert tipo_equipo.stock_granel == 10
+
+
+@pytest.mark.django_db
+@pytest.mark.parametrize(
+    "estado",
+    [
+        Prestamo.Estado.SOLICITADA,
+        Prestamo.Estado.ENTREGADA,
+        Prestamo.Estado.CERRADA,
+    ],
+)
+def test_cancelar_prestamo_rechaza_estados_invalidos(alumno, panolero, estado):
+    prestamo, detalle, _tipo_equipo, unidad = _prestamo_serie(
+        alumno,
+        nombre=f"Multímetro cancelación inválida {estado}",
+    )
+    prestamo.estado = estado
+    prestamo.save(update_fields=["estado"])
+    if estado == Prestamo.Estado.ENTREGADA:
+        unidad.situacion = Unidad.Situacion.PRESTADA
+        unidad.save(update_fields=["situacion"])
+    elif estado == Prestamo.Estado.CERRADA:
+        detalle.cantidad_devuelta = 1
+        detalle.save(update_fields=["cantidad_devuelta"])
+
+    with pytest.raises(ValidationError) as exc_info:
+        cancelar_prestamo(prestamo, panolero)
+
+    prestamo.refresh_from_db()
+    assert "aprobados o preparados" in str(exc_info.value)
+    assert prestamo.estado == estado
+
+
+@pytest.mark.django_db
+def test_unidad_liberada_por_cancelacion_puede_reservarse_en_otro_prestamo(
+    alumno,
+    panolero,
+):
+    tipo_equipo = _tipo_serie("Osciloscopio cancelación reutilizable")
+    unidad = baker.make(
+        Unidad,
+        tipo_equipo=tipo_equipo,
+        codigo_activo="CANCEL-REUSE-001",
+        situacion=Unidad.Situacion.DISPONIBLE,
+        estado=Unidad.Estado.BUENO,
+    )
+    primer_prestamo, _detalle, _tipo_equipo, _unidad = _prestamo_serie(
+        alumno,
+        unidad=unidad,
+    )
+    segundo_prestamo, _detalle2, _tipo_equipo2, _unidad2 = _prestamo_serie(
+        alumno,
+        unidad=unidad,
+    )
+    aprobar_prestamo(primer_prestamo, panolero)
+    preparar_prestamo(primer_prestamo, panolero)
+    cancelar_prestamo(primer_prestamo, panolero)
+    aprobar_prestamo(segundo_prestamo, panolero)
+
+    preparar_prestamo(segundo_prestamo, panolero)
+
+    primer_prestamo.refresh_from_db()
+    segundo_prestamo.refresh_from_db()
+    unidad.refresh_from_db()
+    assert primer_prestamo.estado == Prestamo.Estado.CANCELADA
+    assert segundo_prestamo.estado == Prestamo.Estado.PREPARADA
+    assert unidad.situacion == Unidad.Situacion.RESERVADA
+
+
+@pytest.mark.django_db
+def test_api_accion_cancelar_panolero_puede_cancelar(api_client, alumno, panolero):
+    prestamo, _detalle, _tipo_equipo, unidad = _prestamo_serie(
+        alumno,
+        nombre="Multímetro API cancelar",
+    )
+    aprobar_prestamo(prestamo, panolero)
+    preparar_prestamo(prestamo, panolero)
+    api_client.force_authenticate(user=panolero)
+
+    response = api_client.post(
+        f"/api/prestamos/{prestamo.id}/cancelar/",
+        {"motivo": "Alumno no retira"},
+        format="json",
+    )
+
+    prestamo.refresh_from_db()
+    unidad.refresh_from_db()
+    assert response.status_code == 200
+    assert response.data["estado"] == Prestamo.Estado.CANCELADA
+    assert prestamo.estado == Prestamo.Estado.CANCELADA
+    assert prestamo.motivo_rechazo == "Alumno no retira"
+    assert unidad.situacion == Unidad.Situacion.DISPONIBLE
+
+
+@pytest.mark.django_db
+def test_api_accion_cancelar_alumno_no_puede_cancelar(api_client, alumno, panolero):
+    prestamo, _detalle, _tipo_equipo, unidad = _prestamo_serie(
+        alumno,
+        nombre="Multímetro API cancelar prohibido",
+    )
+    aprobar_prestamo(prestamo, panolero)
+    preparar_prestamo(prestamo, panolero)
+    api_client.force_authenticate(user=alumno)
+
+    response = api_client.post(f"/api/prestamos/{prestamo.id}/cancelar/")
+
+    prestamo.refresh_from_db()
+    unidad.refresh_from_db()
+    assert response.status_code == 403
+    assert prestamo.estado == Prestamo.Estado.PREPARADA
+    assert unidad.situacion == Unidad.Situacion.RESERVADA
