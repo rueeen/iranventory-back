@@ -17,6 +17,7 @@ class Prestamo(models.Model):
         DEVOLUCION = "DEVOLUCION", "En devolución"
         CERRADA = "CERRADA", "Cerrada"
         RECHAZADA = "RECHAZADA", "Rechazada"
+        CANCELADA = "CANCELADA", "Cancelada"
 
     solicitante = models.ForeignKey(
         "cuentas.Usuario",

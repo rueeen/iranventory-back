@@ -36,6 +36,36 @@ def rechazar_prestamo(prestamo: Prestamo, usuario=None, motivo="") -> Prestamo:
 
 
 @transaction.atomic
+def cancelar_prestamo(prestamo: Prestamo, usuario=None, motivo="") -> Prestamo:
+    prestamo = Prestamo.objects.select_for_update().get(pk=prestamo.pk)
+    if prestamo.estado not in {Prestamo.Estado.APROBADA, Prestamo.Estado.PREPARADA}:
+        raise ValidationError(
+            "Solo los préstamos aprobados o preparados pueden cancelarse. "
+            "Use rechazo para solicitudes y devolución para préstamos entregados."
+        )
+
+    estado_original = prestamo.estado
+    detalles = _detalles_bloqueados(prestamo)
+    for detalle in detalles:
+        detalle.full_clean()
+        if detalle.tipo_equipo.tipo_seguimiento == TipoEquipo.TipoSeguimiento.SERIE:
+            unidad = Unidad.objects.select_for_update().get(pk=detalle.unidad_id)
+            if unidad.situacion == Unidad.Situacion.RESERVADA:
+                unidad.situacion = Unidad.Situacion.DISPONIBLE
+                unidad.save(update_fields=["situacion"])
+        elif estado_original == Prestamo.Estado.PREPARADA:
+            TipoEquipo.objects.select_for_update().filter(
+                pk=detalle.tipo_equipo_id
+            ).update(stock_granel=F("stock_granel") + detalle.cantidad)
+
+    prestamo.estado = Prestamo.Estado.CANCELADA
+    # Se reutiliza motivo_rechazo para evitar agregar otro campo de motivo terminal.
+    prestamo.motivo_rechazo = motivo or ""
+    prestamo.save(update_fields=["estado", "motivo_rechazo"])
+    return prestamo
+
+
+@transaction.atomic
 def preparar_prestamo(prestamo: Prestamo, usuario=None) -> Prestamo:
     prestamo = Prestamo.objects.select_for_update().get(pk=prestamo.pk)
     if prestamo.estado != Prestamo.Estado.APROBADA:
@@ -103,7 +133,8 @@ def entregar_prestamo(prestamo: Prestamo, usuario=None) -> Prestamo:
                 or unidad.requiere_revision
             ):
                 raise ValidationError(
-                    f"La unidad {unidad} ya no está reservada y disponible para entrega."
+                    f"La unidad {unidad} ya no está reservada y disponible "
+                    "para entrega."
                 )
             unidad.situacion = Unidad.Situacion.PRESTADA
             unidad.save(update_fields=["situacion"])
