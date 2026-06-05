@@ -1,10 +1,14 @@
+from zipfile import BadZipFile
+
 from django.db.models import Count, F, Q
 from django_filters import rest_framework as filters
-from rest_framework import viewsets
+from openpyxl.utils.exceptions import InvalidFileException
+from rest_framework import parsers, response, serializers, status, views, viewsets
 from rest_framework.filters import SearchFilter
 
 from apps.cuentas.permissions import SoloLecturaOPanolero
 
+from .importacion_estandar import importar_estandar
 from .models import Asignatura, Carrera, Categoria, TipoEquipo, Ubicacion
 from .serializers import (
     AsignaturaSerializer,
@@ -39,9 +43,9 @@ class TipoEquipoFilter(filters.FilterSet):
             ),
         )
         granel = Q(tipo_seguimiento=TipoEquipo.TipoSeguimiento.GRANEL)
-        con_brecha = (
-            granel & Q(cantidad_necesaria__gt=F("stock_granel"))
-        ) | (~granel & Q(cantidad_necesaria__gt=F("unidades_activas")))
+        con_brecha = (granel & Q(cantidad_necesaria__gt=F("stock_granel"))) | (
+            ~granel & Q(cantidad_necesaria__gt=F("unidades_activas"))
+        )
 
         if value:
             return queryset.filter(con_brecha).distinct()
@@ -90,3 +94,40 @@ class TipoEquipoViewSet(viewsets.ModelViewSet):
     filterset_class = TipoEquipoFilter
     filter_backends = [filters.DjangoFilterBackend, SearchFilter]
     search_fields = ["nombre"]
+
+
+class ImportarEstandarCatalogoView(views.APIView):
+    """Carga en memoria una planilla .xlsx del estándar de equipamiento."""
+
+    permission_classes = [SoloLecturaOPanolero]
+    parser_classes = [parsers.MultiPartParser, parsers.FormParser]
+    max_upload_size = 10 * 1024 * 1024
+
+    def post(self, request):
+        archivo = request.FILES.get("archivo")
+        if archivo is None:
+            raise serializers.ValidationError(
+                {"archivo": "Debe enviar un archivo .xlsx en el campo 'archivo'."}
+            )
+
+        nombre = archivo.name or ""
+        if not nombre.lower().endswith(".xlsx"):
+            raise serializers.ValidationError(
+                {"archivo": "El archivo debe tener extensión .xlsx."}
+            )
+        if archivo.size > self.max_upload_size:
+            raise serializers.ValidationError(
+                {"archivo": "El archivo no puede superar 10 MB."}
+            )
+
+        try:
+            resumen = importar_estandar(archivo)
+        except (BadZipFile, InvalidFileException, OSError, ValueError) as exc:
+            raise serializers.ValidationError(
+                {
+                    "archivo": "No se pudo leer el archivo .xlsx. "
+                    "Verifique que no esté corrupto."
+                }
+            ) from exc
+
+        return response.Response(resumen.to_dict(), status=status.HTTP_200_OK)

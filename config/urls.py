@@ -14,6 +14,7 @@ from apps.catalogo.views import (
     AsignaturaViewSet,
     CarreraViewSet,
     CategoriaViewSet,
+    ImportarEstandarCatalogoView,
     TipoEquipoViewSet,
     UbicacionViewSet,
 )
@@ -54,5 +55,10 @@ urlpatterns = [
     path("api/token/blacklist/", TokenBlacklistView.as_view(), name="token_blacklist"),
     path("api/me/", MeView.as_view(), name="me"),
     path("api/registro/", RegistroView.as_view(), name="registro"),
+    path(
+        "api/catalogo/importar-estandar/",
+        ImportarEstandarCatalogoView.as_view(),
+        name="catalogo-importar-estandar",
+    ),
     path("api/", include(router.urls)),
 ]
