@@ -160,3 +160,7 @@ INVENTARIO_AREA = env(
     "INVENTARIO_AREA", default="Informática, Ciberseguridad y Telecomunicaciones"
 )
 INVENTARIO_SEDE = env("INVENTARIO_SEDE", default="Arica")
+
+LIBREOFFICE_BIN = env("LIBREOFFICE_BIN", default="soffice")
+LIBREOFFICE_TIMEOUT = env.int("LIBREOFFICE_TIMEOUT", default=60)
+DOCUMENTOS_PDF = env.bool("DOCUMENTOS_PDF", default=True)
