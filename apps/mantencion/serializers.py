@@ -76,7 +76,17 @@ class OrdenMantencionSerializer(serializers.ModelSerializer):
         fields = ["id", "numero"]
 
 
+class UnidadRegistroMantencionSerializer(UnidadMantencionSerializer):
+    tipo_equipo_nombre = serializers.CharField(
+        source="tipo_equipo.nombre", read_only=True
+    )
+
+    class Meta(UnidadMantencionSerializer.Meta):
+        fields = ["id", "codigo_activo", "codigo_peoplesoft", "tipo_equipo_nombre"]
+
+
 class RegistroMantencionSerializer(serializers.ModelSerializer):
+    unidad_detalle = UnidadRegistroMantencionSerializer(source="unidad", read_only=True)
     proveedor = ProveedorMantencionSerializer(read_only=True)
     orden_compra = OrdenMantencionSerializer(read_only=True)
     proveedor_id = serializers.PrimaryKeyRelatedField(
@@ -99,6 +109,7 @@ class RegistroMantencionSerializer(serializers.ModelSerializer):
         fields = [
             "id",
             "unidad",
+            "unidad_detalle",
             "plan",
             "tipo",
             "fecha_solicitud",
