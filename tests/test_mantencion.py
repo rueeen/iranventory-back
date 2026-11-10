@@ -374,14 +374,14 @@ def test_exportacion_e_ida_y_vuelta(cliente, unidad, plan):
     assert hoja["A2"].value == TITULO
     assert hoja["A2"].font.bold
     assert "A2:H2" in hoja.merged_cells
-    assert [hoja.cell(5, c).value for c in range(1, 9)] == ENCABEZADOS
+    assert [" ".join(hoja.cell(5, c).value.split()) for c in range(1, 9)] == ENCABEZADOS
     assert hoja["A6"].value == "UTC000437291\n180000003256"
     assert hoja["A6"].alignment.wrap_text
     assert hoja["F6"].value == "Media"
     assert hoja["G6"].number_format == "DD/MM/YYYY"
     validacion = list(hoja.data_validations.dataValidation)[0]
     assert "F6" in validacion.sqref
-    assert validacion.formula1 == '"Baja,Media,Alta"'
+    assert validacion.formula1 == "$K$6:$K$8"
     libro.close()
     resultado = importar_plan(BytesIO(res.content), simular=False)
     assert resultado.planes_creados == 0

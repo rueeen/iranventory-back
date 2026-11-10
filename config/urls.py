@@ -24,6 +24,7 @@ from apps.compras.views import (
     ProveedorViewSet,
 )
 from apps.cuentas.views import MeView, RegistroView, UsuarioViewSet
+from apps.documentos.views import CapacidadesDocumentosView
 from apps.inventario.views import UnidadViewSet
 from apps.mantencion.views import PlanMantencionViewSet, RegistroMantencionViewSet
 from apps.prestamos.views import PrestamoViewSet
@@ -64,6 +65,11 @@ urlpatterns = [
         "api/catalogo/importar-estandar/",
         ImportarEstandarCatalogoView.as_view(),
         name="catalogo-importar-estandar",
+    ),
+    path(
+        "api/documentos/capacidades/",
+        CapacidadesDocumentosView.as_view(),
+        name="documentos-capacidades",
     ),
     path("api/", include(router.urls)),
 ]
