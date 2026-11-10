@@ -24,3 +24,7 @@ htmlcov/
 .vscode/
 .idea/
 .DS_Store
+
+# Documentos institucionales con datos reales: nunca al repo
+apps/static/
+datos_reales/

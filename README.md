@@ -143,7 +143,7 @@ Acceso exclusivo de PAÑOLERO y DIRECTOR, incluso en lectura:
   `fecha_realizacion`, `fecha_desde` y `fecha_hasta`.
 - `/api/unidades/{id}/enviar-mantencion/`: POST; solo desde `DISPONIBLE`.
 - `/api/unidades/{id}/ficha-mantencion/`: GET; cabecera y registros por fecha
-  ascendente para que el frontend genere la ficha PDF.
+  ascendente; admite JSON, Word y PDF cuando LibreOffice está disponible.
 
 La ficha toma el área y sede de `INVENTARIO_AREA` e `INVENTARIO_SEDE`, con valores
 predeterminados "Informática, Ciberseguridad y Telecomunicaciones" y "Arica".
@@ -167,3 +167,55 @@ python manage.py importar_plan_mantencion plan.xlsx --aplicar --crear-faltantes
 La exportación y posterior importación identifican el plan por unidad y actividad
 para actualizarlo sin duplicarlo. El formato Excel contiene las ocho columnas
 institucionales; no transporta las observaciones ni la bandera `activo` del plan.
+
+## Documentos institucionales
+
+Las plantillas oficiales están en `apps/documentos/plantillas/`. **Solo se guardan
+plantillas en blanco**: nunca commitear inventarios o planillas con datos reales,
+porque el repositorio es público. `apps/static/` y `datos_reales/` están ignorados.
+Los `.doc` de Word 97 en `plantillas/originales/` son solo referencia histórica;
+el código usa los `.docx`. Las plantillas de inventario y solicitud de materiales
+quedan disponibles para futuras integraciones.
+
+El plan de mantención se exporta rellenando `plan_mantencion.xlsx`, conservando
+logo, estilos y la lista de prioridades en `K6:K8`. Las filas A–H se completan
+desde la fila 6; a partir de la fila 41 se copian los estilos de la fila 6. La
+impresión se ajusta al ancho de una página horizontal y repite los encabezados.
+
+La ficha admite `GET /api/unidades/{id}/ficha-mantencion/?formato=json|docx|pdf`.
+Sin parámetro conserva la respuesta JSON. El Word rellena las cinco tablas de
+`ficha_mantencion.docx`: título, datos generales, marca/ubicación, códigos y tabla
+de actividades. La fecha va en la columna preventivo o correctivo según el tipo;
+los costos se muestran en CLP. Los registros se ordenan por fecha ascendente.
+Si el PDF no está disponible, devuelve HTTP 503 con `code=pdf_no_disponible` y se
+puede descargar Word. `GET /api/documentos/capacidades/` informa `{"pdf": true|false}`.
+Estos endpoints requieren PAÑOLERO o DIRECTOR.
+
+Para reemplazar una plantilla, usar un archivo en blanco con el mismo nombre y
+conservar la estructura: hoja `MANTENCIÓN DE EQUIPOS`, encabezados en fila 5,
+filas formateadas 6–40 y validación `F6:F40` vinculada a `K6:K8`; en Word,
+conservar los índices de las cinco tablas y sus celdas descritos en
+`apps/mantencion/ficha_docx.py`, los tres encabezados y las siete filas de
+actividades, además de los párrafos de firma. Se pueden actualizar logo y estilos
+sin alterar ese mapa. Cada descarga abre una copia desde disco; nunca escribe
+sobre la plantilla original.
+
+En PythonAnywhere, revisar la imagen en **Account → System image** ("glastonbury"
+o posterior) y comprobar en una consola Bash:
+
+```bash
+soffice --version
+fc-list | grep -iE 'carlito|calibri'
+```
+
+El PDF usa LibreOffice si está disponible, con perfil y directorio temporal por
+conversión para aislar requests concurrentes. Las plantillas usan Calibri: si el
+servidor no tiene Calibri ni Carlito (su equivalente métrico), el PDF puede tener
+pequeñas diferencias de espaciado. Word conserva el formato de la plantilla.
+No es necesario instalar paquetes del sistema para descargar Word o Excel.
+Configurar `LIBREOFFICE_BIN` (por defecto `soffice`), `LIBREOFFICE_TIMEOUT` (60
+segundos) y `DOCUMENTOS_PDF` (`True`). Ante problemas se puede desactivar el PDF
+con `DOCUMENTOS_PDF=False`.
+
+Los PDF en `docs/ejemplos/` son muestras generadas con datos ficticios para revisar
+el resultado del plan y de una ficha con actividades preventivas y correctivas.

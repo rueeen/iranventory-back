@@ -8,11 +8,11 @@ from io import BytesIO
 
 from django.core.exceptions import ValidationError
 from django.db import transaction
-from openpyxl import Workbook, load_workbook
-from openpyxl.styles import Alignment, Font
-from openpyxl.worksheet.datavalidation import DataValidation
+from openpyxl import load_workbook
 
 from apps.catalogo.models import TipoEquipo
+from apps.documentos.excel import copiar_estilo_fila, extender_validacion
+from apps.documentos.plantillas import ruta_plantilla
 from apps.inventario.models import Unidad
 
 from .models import PlanMantencion
@@ -244,50 +244,42 @@ def importar_plan(
 
 
 def exportar_plan(queryset):
-    libro = Workbook()
-    hoja = libro.active
-    hoja.title = "MANTENCIÓN DE EQUIPOS"
-    hoja.merge_cells("A2:H2")
-    hoja["A2"] = TITULO
-    hoja["A2"].font = Font(bold=True, size=14)
-    hoja.append([])
-    for columna, encabezado in enumerate(ENCABEZADOS, start=1):
-        celda = hoja.cell(5, columna, encabezado)
-        celda.font = Font(bold=True)
-        celda.alignment = Alignment(wrap_text=True)
-    for fila, plan in enumerate(queryset, start=6):
-        unidad = plan.unidad
-        codigos = "\n".join(
-            c for c in [unidad.codigo_activo, unidad.codigo_peoplesoft] if c
-        )
-        valores = [
-            codigos,
-            unidad.tipo_equipo.nombre,
-            unidad.tipo_equipo.especificacion,
-            plan.actividad,
-            plan.get_frecuencia_display(),
-            plan.get_prioridad_display(),
-            plan.fecha_ultima_mantencion,
-            plan.responsable,
-        ]
-        for columna, valor in enumerate(valores, start=1):
-            celda = hoja.cell(fila, columna, valor)
-            # Los textos importados son datos, incluso si empiezan con '='.
-            if isinstance(valor, str):
-                celda.data_type = "s"
-            celda.alignment = Alignment(wrap_text=True, vertical="top")
-        hoja.cell(fila, 7).number_format = "DD/MM/YYYY"
-        hoja.row_dimensions[fila].height = 42
-    validacion = DataValidation(type="list", formula1='"Baja,Media,Alta"')
-    hoja.add_data_validation(validacion)
-    validacion.add(f"F6:F{max(6, hoja.max_row)}")
-    for columna, ancho in zip(
-        "ABCDEFGH", [27, 35, 60, 42, 18, 15, 24, 32], strict=True
-    ):
-        hoja.column_dimensions[columna].width = ancho
-    hoja.row_dimensions[5].height = 45
-    hoja.freeze_panes = "A6"
-    salida = BytesIO()
-    libro.save(salida)
-    libro.close()
-    return salida.getvalue()
+    libro = load_workbook(ruta_plantilla("plan_mantencion.xlsx"))
+    try:
+        hoja = libro["MANTENCIÓN DE EQUIPOS"]
+        ultima = 6
+        for fila, plan in enumerate(queryset, start=6):
+            if fila > 40:
+                copiar_estilo_fila(hoja, 6, fila, range(1, 9))
+            unidad = plan.unidad
+            codigos = "\n".join(
+                c for c in [unidad.codigo_activo, unidad.codigo_peoplesoft] if c
+            )
+            valores = [
+                codigos,
+                unidad.tipo_equipo.nombre,
+                unidad.tipo_equipo.especificacion,
+                plan.actividad,
+                plan.get_frecuencia_display(),
+                plan.get_prioridad_display(),
+                plan.fecha_ultima_mantencion,
+                plan.responsable,
+            ]
+            for columna, valor in enumerate(valores, start=1):
+                celda = hoja.cell(fila, columna, valor)
+                if isinstance(valor, str):
+                    celda.data_type = "s"
+            hoja.cell(fila, 7).number_format = "DD/MM/YYYY"
+            ultima = fila
+        extender_validacion(hoja, "F6:F40", ultima)
+        hoja.print_area = f"A1:H{ultima}"
+        hoja.page_setup.fitToWidth = 1
+        hoja.page_setup.fitToHeight = 0
+        hoja.sheet_properties.pageSetUpPr.fitToPage = True
+        hoja.page_setup.orientation = "landscape"
+        hoja.print_title_rows = "5:5"
+        salida = BytesIO()
+        libro.save(salida)
+        return salida.getvalue()
+    finally:
+        libro.close()

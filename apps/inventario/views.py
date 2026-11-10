@@ -1,12 +1,17 @@
 from django.conf import settings
 from django.db.models import Max
+from django.http import HttpResponse
+from django.utils.http import content_disposition_header
+from django.utils.text import get_valid_filename
 from django_filters import rest_framework as filters
-from drf_spectacular.utils import extend_schema
+from drf_spectacular.utils import OpenApiParameter, OpenApiTypes, extend_schema
 from rest_framework import decorators, response, viewsets
 from rest_framework.filters import SearchFilter
 
 from apps.cuentas.permissions import SoloLecturaOPanolero, SoloPanoleroODirector
+from apps.documentos.pdf import PdfNoDisponible, convertir_a_pdf
 from apps.mantencion.api import validar_operacion
+from apps.mantencion.ficha_docx import generar_ficha_docx
 from apps.mantencion.serializers import FichaMantencionSerializer
 from apps.mantencion.services import enviar_a_mantencion
 
@@ -51,7 +56,24 @@ class UnidadViewSet(viewsets.ModelViewSet):
         unidad = validar_operacion(enviar_a_mantencion, self.get_object(), request.user)
         return response.Response(self.get_serializer(unidad).data)
 
-    @extend_schema(responses=FichaMantencionSerializer)
+    @extend_schema(
+        parameters=[
+            OpenApiParameter(
+                "formato",
+                type=str,
+                enum=["json", "docx", "pdf"],
+                description="Formato de descarga; json por defecto.",
+            )
+        ],
+        responses={
+            (200, "application/json"): FichaMantencionSerializer,
+            (
+                200,
+                "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+            ): OpenApiTypes.BINARY,
+            (200, "application/pdf"): OpenApiTypes.BINARY,
+        },
+    )
     @decorators.action(
         detail=True,
         methods=["get"],
@@ -59,6 +81,11 @@ class UnidadViewSet(viewsets.ModelViewSet):
         permission_classes=[SoloPanoleroODirector],
     )
     def ficha_mantencion(self, request, pk=None):
+        formato = request.query_params.get("formato", "json")
+        if formato not in {"json", "docx", "pdf"}:
+            return response.Response(
+                {"detail": "Formato inválido. Usa json, docx o pdf."}, status=400
+            )
         unidad = self.get_object()
         registros = unidad.registros_mantencion.order_by("fecha_realizacion", "id")
         tipo = unidad.tipo_equipo
@@ -80,4 +107,31 @@ class UnidadViewSet(viewsets.ModelViewSet):
             "periodo_calibracion": unidad.periodo_calibracion,
             "registros": registros,
         }
-        return response.Response(FichaMantencionSerializer(datos).data)
+        datos_ficha = FichaMantencionSerializer(datos).data
+        if formato == "json":
+            return response.Response(datos_ficha)
+        contenido = generar_ficha_docx(datos_ficha)
+        tipo_contenido = (
+            "application/vnd.openxmlformats-officedocument.wordprocessingml.document"
+        )
+        if formato == "pdf":
+            try:
+                contenido = convertir_a_pdf(contenido)
+            except PdfNoDisponible:
+                return response.Response(
+                    {
+                        "detail": (
+                            "La conversión a PDF no está disponible en este servidor. "
+                            "Descarga la ficha en Word."
+                        ),
+                        "code": "pdf_no_disponible",
+                    },
+                    status=503,
+                )
+            tipo_contenido = "application/pdf"
+        nombre = get_valid_filename(
+            f"Ficha_Mantencion_{unidad.codigo_activo or unidad.pk}.{formato}"
+        )
+        respuesta = HttpResponse(contenido, content_type=tipo_contenido)
+        respuesta["Content-Disposition"] = content_disposition_header(True, nombre)
+        return respuesta
