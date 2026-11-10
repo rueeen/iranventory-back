@@ -2,9 +2,11 @@
 
 import re
 import unicodedata
+from copy import copy
 from dataclasses import asdict, dataclass, field
 from datetime import date, datetime
 from io import BytesIO
+from math import ceil
 
 from django.core.exceptions import ValidationError
 from django.db import transaction
@@ -249,8 +251,7 @@ def exportar_plan(queryset):
         hoja = libro["MANTENCIÓN DE EQUIPOS"]
         ultima = 6
         for fila, plan in enumerate(queryset, start=6):
-            if fila > 40:
-                copiar_estilo_fila(hoja, 6, fila, range(1, 9))
+            copiar_estilo_fila(hoja, 6, fila, range(1, 9))
             unidad = plan.unidad
             codigos = "\n".join(
                 c for c in [unidad.codigo_activo, unidad.codigo_peoplesoft] if c
@@ -269,6 +270,16 @@ def exportar_plan(queryset):
                 celda = hoja.cell(fila, columna, valor)
                 if isinstance(valor, str):
                     celda.data_type = "s"
+                alineacion = copy(celda.alignment)
+                alineacion.wrap_text = True
+                alineacion.vertical = "center"
+                celda.alignment = alineacion
+            lineas = [codigos.count("\n") + 1]
+            for letra in ("C", "D"):
+                ancho = max(1, hoja.column_dimensions[letra].width or 1)
+                texto_celda = str(hoja[f"{letra}{fila}"].value or "")
+                lineas.append(ceil(len(texto_celda) / ancho))
+            hoja.row_dimensions[fila].height = min(120, max(30, 15 * max(lineas)))
             hoja.cell(fila, 7).number_format = "DD/MM/YYYY"
             ultima = fila
         extender_validacion(hoja, "F6:F40", ultima)

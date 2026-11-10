@@ -179,7 +179,8 @@ quedan disponibles para futuras integraciones.
 
 El plan de mantención se exporta rellenando `plan_mantencion.xlsx`, conservando
 logo, estilos y la lista de prioridades en `K6:K8`. Las filas A–H se completan
-desde la fila 6; a partir de la fila 41 se copian los estilos de la fila 6. La
+desde la fila 6, usando su estilo en todas las filas con datos y ajustando el alto
+entre 30 y 120 según el contenido. Las filas vacías conservan su formato. La
 impresión se ajusta al ancho de una página horizontal y repite los encabezados.
 
 La ficha admite `GET /api/unidades/{id}/ficha-mantencion/?formato=json|docx|pdf`.
