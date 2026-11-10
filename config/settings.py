@@ -43,6 +43,7 @@ INSTALLED_APPS = [
     "apps.inventario",
     "apps.compras",
     "apps.prestamos",
+    "apps.mantencion",
 ]
 
 MIDDLEWARE = [
@@ -154,3 +155,8 @@ SIMPLE_JWT = {
     "BLACKLIST_AFTER_ROTATION": True,
 }
 AXES_RESET_COOL_OFF_ON_FAILURE_DURING_LOCKOUT = False
+
+INVENTARIO_AREA = env(
+    "INVENTARIO_AREA", default="Informática, Ciberseguridad y Telecomunicaciones"
+)
+INVENTARIO_SEDE = env("INVENTARIO_SEDE", default="Arica")
