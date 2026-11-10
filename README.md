@@ -40,6 +40,12 @@ El flujo principal de un préstamo es:
 SOLICITADA -> APROBADA -> PREPARADA -> ENTREGADA -> DEVOLUCION -> CERRADA
 ```
 
+Un préstamo está atrasado solo si está `ENTREGADA`, tiene fecha de devolución
+comprometida y esa fecha ya pasó. Los días de atraso se calculan por calendario
+en `America/Santiago`, con mínimo uno. El filtro `?atrasado=true` lista los
+atrasados y `GET /api/prestamos/resumen-atrasos/` entrega sus conteos y el más
+antiguo, respetando la visibilidad por usuario.
+
 También existe una rama de rechazo:
 
 ```text
