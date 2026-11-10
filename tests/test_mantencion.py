@@ -5,7 +5,8 @@ from unittest.mock import patch
 
 import pytest
 from django.core.exceptions import PermissionDenied, ValidationError
-from django.db import IntegrityError, transaction
+from django.db import IntegrityError, connection, transaction
+from django.test.utils import CaptureQueriesContext
 from django.utils import timezone
 from model_bakery import baker
 from openpyxl import load_workbook
@@ -502,3 +503,109 @@ def test_esquema_endpoints(cliente):
         "content"
     ]["application/json"]["schema"]
     assert schema == {"$ref": "#/components/schemas/FichaMantencion"}
+
+
+def test_registros_incluyen_unidad_detalle(cliente, unidad, panolero):
+    registro = registrar_mantencion(datos(unidad), panolero)
+    res = cliente.get("/api/registros-mantencion/")
+    assert res.status_code == 200
+    assert res.data["count"] == 1
+    fila = res.data["results"][0]
+    assert fila["id"] == registro.pk
+    assert fila["unidad"] == unidad.pk
+    assert fila["unidad_detalle"] == {
+        "id": unidad.pk,
+        "codigo_activo": "UTC000437291",
+        "codigo_peoplesoft": "180000003256",
+        "tipo_equipo_nombre": "Computador",
+    }
+
+
+@pytest.mark.parametrize(
+    "busqueda",
+    [
+        "UTC000437291",
+        "180000003256",
+        "Computador",
+        "Limpieza técnica",
+        "Empresa específica",
+        "Colaborador específico",
+    ],
+)
+def test_busqueda_registros(cliente, unidad, panolero, busqueda):
+    registro = registrar_mantencion(
+        datos(
+            unidad,
+            empresa="Empresa específica",
+            realizado_por="Colaborador específico",
+        ),
+        panolero,
+    )
+    otra = baker.make(
+        Unidad,
+        tipo_equipo=baker.make(TipoEquipo, nombre="Osciloscopio"),
+        codigo_activo="CFT000156480",
+        codigo_peoplesoft="1800001715",
+    )
+    registrar_mantencion(datos(otra, descripcion="Calibración"), panolero)
+    res = cliente.get("/api/registros-mantencion/", {"search": busqueda})
+    assert res.status_code == 200
+    assert [fila["id"] for fila in res.data["results"]] == [registro.pk]
+    combinado = cliente.get(
+        "/api/registros-mantencion/",
+        {
+            "search": busqueda,
+            "unidad": otra.pk,
+        },
+    )
+    assert combinado.status_code == 200
+    assert combinado.data["count"] == 0
+
+
+def test_queries_listado_registros_no_crecen_con_unidades(cliente, unidad, panolero):
+    registrar_mantencion(datos(unidad), panolero)
+    with CaptureQueriesContext(connection) as una:
+        res = cliente.get("/api/registros-mantencion/")
+        assert res.status_code == 200
+        assert len(res.data["results"]) == 1
+    for indice in range(4):
+        otra = baker.make(
+            Unidad,
+            tipo_equipo=baker.make(TipoEquipo, nombre=f"Equipo {indice}"),
+        )
+        registrar_mantencion(datos(otra), panolero)
+    with CaptureQueriesContext(connection) as cinco:
+        res = cliente.get("/api/registros-mantencion/")
+        assert res.status_code == 200
+        assert len(res.data["results"]) == 5
+        assert len({fila["unidad_detalle"]["id"] for fila in res.data["results"]}) == 5
+    assert 0 < len(cinco) <= len(una) <= 2
+
+
+def test_unidad_sigue_escribible_y_detalle_es_solo_lectura(cliente, unidad):
+    otra = baker.make(Unidad, tipo_equipo=baker.make(TipoEquipo, nombre="Otro equipo"))
+    res = cliente.post(
+        "/api/registros-mantencion/",
+        {
+            "unidad": unidad.pk,
+            "tipo": "PREVENTIVO",
+            "fecha_realizacion": str(timezone.localdate()),
+            "descripcion": "Revisión",
+            "unidad_detalle": {"id": otra.pk, "tipo_equipo_nombre": "Ignorar"},
+        },
+        format="json",
+    )
+    assert res.status_code == 201, res.data
+    assert res.data["unidad"] == unidad.pk
+    assert res.data["unidad_detalle"]["id"] == unidad.pk
+    res = cliente.patch(
+        f"/api/registros-mantencion/{res.data['id']}/",
+        {
+            "unidad": otra.pk,
+            "unidad_detalle": {"id": unidad.pk},
+        },
+        format="json",
+    )
+    assert res.status_code == 200, res.data
+    assert res.data["unidad"] == otra.pk
+    assert res.data["unidad_detalle"]["tipo_equipo_nombre"] == "Otro equipo"

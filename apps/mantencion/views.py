@@ -127,12 +127,20 @@ class PlanMantencionViewSet(viewsets.ModelViewSet):
 )
 class RegistroMantencionViewSet(viewsets.ModelViewSet):
     queryset = RegistroMantencion.objects.select_related(
-        "unidad", "plan", "proveedor", "orden_compra"
+        "unidad", "unidad__tipo_equipo", "plan", "proveedor", "orden_compra"
     )
     serializer_class = RegistroMantencionSerializer
     permission_classes = [SoloPanoleroODirector]
-    filter_backends = [DjangoFilterBackend]
+    filter_backends = [DjangoFilterBackend, SearchFilter]
     filterset_class = RegistroMantencionFilter
+    search_fields = [
+        "unidad__codigo_activo",
+        "unidad__codigo_peoplesoft",
+        "unidad__tipo_equipo__nombre",
+        "descripcion",
+        "empresa",
+        "realizado_por",
+    ]
 
     def perform_create(self, serializer):
         serializer.instance = validar_operacion(
