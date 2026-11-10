@@ -25,6 +25,7 @@ from apps.compras.views import (
 )
 from apps.cuentas.views import MeView, RegistroView, UsuarioViewSet
 from apps.inventario.views import UnidadViewSet
+from apps.mantencion.views import PlanMantencionViewSet, RegistroMantencionViewSet
 from apps.prestamos.views import PrestamoViewSet
 
 router = DefaultRouter()
@@ -38,6 +39,10 @@ router.register("proveedores", ProveedorViewSet, basename="proveedor")
 router.register("ordenes-compra", OrdenCompraViewSet, basename="orden-compra")
 router.register(
     "items-orden-compra", ItemOrdenCompraViewSet, basename="item-orden-compra"
+)
+router.register("planes-mantencion", PlanMantencionViewSet, basename="plan-mantencion")
+router.register(
+    "registros-mantencion", RegistroMantencionViewSet, basename="registro-mantencion"
 )
 router.register("prestamos", PrestamoViewSet, basename="prestamo")
 router.register("usuarios", UsuarioViewSet, basename="usuario")

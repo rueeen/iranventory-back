@@ -23,6 +23,14 @@ class Unidad(models.Model):
         related_name="unidades",
     )
     codigo_activo = models.CharField(max_length=40, unique=True, null=True, blank=True)
+    codigo_peoplesoft = models.CharField(
+        max_length=20, unique=True, null=True, blank=True
+    )
+    marca = models.CharField(max_length=80, blank=True)
+    modelo = models.CharField(max_length=120, blank=True)
+    numero_serie = models.CharField(max_length=120, blank=True)
+    codigo_proyecto = models.CharField(max_length=80, blank=True)
+    periodo_calibracion = models.CharField(max_length=80, blank=True)
     estado = models.CharField(
         max_length=10,
         choices=Estado.choices,
@@ -55,3 +63,8 @@ class Unidad(models.Model):
         if self.codigo_activo:
             return f"{self.tipo_equipo} - {self.codigo_activo}"
         return f"{self.tipo_equipo} - unidad {self.pk}"
+
+    def save(self, *args, **kwargs):
+        self.codigo_activo = (self.codigo_activo or "").strip() or None
+        self.codigo_peoplesoft = (self.codigo_peoplesoft or "").strip() or None
+        return super().save(*args, **kwargs)

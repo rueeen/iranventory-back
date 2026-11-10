@@ -96,3 +96,14 @@ class PrestamoPermiso(BasePermission):
             return puede_gestionar
 
         return puede_gestionar
+
+
+class SoloPanoleroODirector(BasePermission):
+    """Acceso exclusivo de mantención para PAÑOLERO y DIRECTOR."""
+
+    def has_permission(self, request, view):
+        return bool(
+            request.user
+            and request.user.is_authenticated
+            and request.user.rol in {Usuario.Rol.PANOLERO, Usuario.Rol.DIRECTOR}
+        )
