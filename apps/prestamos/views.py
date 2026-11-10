@@ -1,13 +1,20 @@
 from django.core.exceptions import ValidationError as DjangoValidationError
+from django.utils import timezone
 from django_filters import rest_framework as filters
+from drf_spectacular.utils import extend_schema
 from rest_framework import decorators, response, serializers, status, viewsets
-from rest_framework.filters import SearchFilter
+from rest_framework.filters import OrderingFilter, SearchFilter
 
 from apps.cuentas.models import Usuario
 from apps.cuentas.permissions import PrestamoPermiso
 
+from .filters import PrestamoFilter
 from .models import Prestamo
-from .serializers import PrestamoSerializer, RegistrarDevolucionSerializer
+from .serializers import (
+    PrestamoSerializer,
+    RegistrarDevolucionSerializer,
+    ResumenAtrasosSerializer,
+)
 from .services import (
     aprobar_prestamo,
     cancelar_prestamo,
@@ -33,8 +40,9 @@ class PrestamoViewSet(viewsets.ModelViewSet):
     ).prefetch_related("detalles", "detalles__tipo_equipo", "detalles__unidad")
     serializer_class = PrestamoSerializer
     permission_classes = [PrestamoPermiso]
-    filter_backends = [filters.DjangoFilterBackend, SearchFilter]
-    filterset_fields = ["estado", "solicitante", "asignatura"]
+    filter_backends = [filters.DjangoFilterBackend, SearchFilter, OrderingFilter]
+    filterset_class = PrestamoFilter
+    ordering_fields = ["fecha_solicitud", "fecha_devolucion_comprometida"]
     search_fields = ["solicitante__username", "observaciones"]
 
     def get_queryset(self):
@@ -42,6 +50,29 @@ class PrestamoViewSet(viewsets.ModelViewSet):
         if self.request.user.rol in {Usuario.Rol.PANOLERO, Usuario.Rol.DIRECTOR}:
             return queryset
         return queryset.filter(solicitante=self.request.user)
+
+    @extend_schema(responses=ResumenAtrasosSerializer, filters=False)
+    @decorators.action(detail=False, methods=["get"], url_path="resumen-atrasos")
+    def resumen_atrasos(self, request):
+        ahora = timezone.now()
+        queryset = self.get_queryset()
+        atrasados = queryset.atrasados(ahora)
+        primero = atrasados.order_by("fecha_devolucion_comprometida", "pk").first()
+        mas_antiguo = None
+        if primero is not None:
+            mas_antiguo = {
+                "id": primero.pk,
+                "fecha_devolucion_comprometida": primero.fecha_devolucion_comprometida,
+                "dias_atraso": primero.dias_atraso(ahora),
+            }
+        serializer = ResumenAtrasosSerializer(
+            {
+                "atrasados": atrasados.count(),
+                "vencen_hoy": queryset.vencen_hoy(ahora).count(),
+                "mas_antiguo": mas_antiguo,
+            }
+        )
+        return response.Response(serializer.data)
 
     @decorators.action(detail=True, methods=["post"])
     def aprobar(self, request, pk=None):

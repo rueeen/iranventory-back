@@ -68,6 +68,8 @@ class RegistrarDevolucionSerializer(serializers.Serializer):
 
 
 class PrestamoSerializer(serializers.ModelSerializer):
+    esta_atrasado = serializers.SerializerMethodField()
+    dias_atraso = serializers.SerializerMethodField()
     asignatura = AsignaturaSerializer(read_only=True)
     asignatura_id = serializers.PrimaryKeyRelatedField(
         allow_null=True,
@@ -89,6 +91,8 @@ class PrestamoSerializer(serializers.ModelSerializer):
             "fecha_solicitud",
             "fecha_requerida",
             "fecha_devolucion_comprometida",
+            "esta_atrasado",
+            "dias_atraso",
             "aprobado_por",
             "preparado_por",
             "entregado_por",
@@ -107,6 +111,12 @@ class PrestamoSerializer(serializers.ModelSerializer):
             "cerrado_por",
             "motivo_rechazo",
         ]
+
+    def get_esta_atrasado(self, obj) -> bool:
+        return obj.esta_atrasado()
+
+    def get_dias_atraso(self, obj) -> int | None:
+        return obj.dias_atraso()
 
     def validate(self, attrs):
         fecha_requerida = attrs.get(
@@ -162,3 +172,15 @@ class PrestamoSerializer(serializers.ModelSerializer):
             for detalle_data in detalles_data:
                 DetallePrestamo.objects.create(prestamo=instance, **detalle_data)
         return instance
+
+
+class PrestamoAtrasadoResumenSerializer(serializers.Serializer):
+    id = serializers.IntegerField()
+    fecha_devolucion_comprometida = serializers.DateTimeField()
+    dias_atraso = serializers.IntegerField()
+
+
+class ResumenAtrasosSerializer(serializers.Serializer):
+    atrasados = serializers.IntegerField()
+    vencen_hoy = serializers.IntegerField()
+    mas_antiguo = PrestamoAtrasadoResumenSerializer(allow_null=True)

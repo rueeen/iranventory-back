@@ -1,9 +1,36 @@
+from datetime import datetime, time, timedelta
+
 from django.core.exceptions import ValidationError
 from django.db import models
+from django.utils import timezone
 from simple_history.models import HistoricalRecords
 
 from apps.catalogo.models import TipoEquipo
 from apps.inventario.models import Unidad
+
+
+def _criterios_atraso(ahora):
+    return {
+        "estado": Prestamo.Estado.ENTREGADA,
+        "fecha_devolucion_comprometida__isnull": False,
+        "fecha_devolucion_comprometida__lt": ahora,
+    }
+
+
+class PrestamoQuerySet(models.QuerySet):
+    def atrasados(self, ahora=None):
+        return self.filter(**_criterios_atraso(ahora or timezone.now()))
+
+    def vencen_hoy(self, ahora=None):
+        ahora = ahora or timezone.now()
+        zona = timezone.get_default_timezone()
+        manana = timezone.localdate(ahora, zona) + timedelta(days=1)
+        fin = timezone.make_aware(datetime.combine(manana, time.min), zona)
+        return self.filter(
+            estado=Prestamo.Estado.ENTREGADA,
+            fecha_devolucion_comprometida__gte=ahora,
+            fecha_devolucion_comprometida__lt=fin,
+        )
 
 
 class Prestamo(models.Model):
@@ -69,6 +96,8 @@ class Prestamo(models.Model):
     )
     motivo_rechazo = models.TextField(blank=True)
     observaciones = models.TextField(blank=True)
+    objects = PrestamoQuerySet.as_manager()
+
     history = HistoricalRecords(
         verbose_name="historical préstamo",
         verbose_name_plural="historical préstamos",
@@ -81,6 +110,28 @@ class Prestamo(models.Model):
 
     def __str__(self) -> str:
         return f"Préstamo {self.pk} - {self.solicitante}"
+
+    def esta_atrasado(self, ahora=None) -> bool:
+        criterios = _criterios_atraso(ahora or timezone.now())
+        fecha = self.fecha_devolucion_comprometida
+        return bool(
+            self.estado == criterios["estado"]
+            and fecha is not None
+            and fecha < criterios["fecha_devolucion_comprometida__lt"]
+        )
+
+    def dias_atraso(self, ahora=None) -> int | None:
+        ahora = ahora or timezone.now()
+        if not self.esta_atrasado(ahora):
+            return None
+        zona = timezone.get_default_timezone()
+        return max(
+            1,
+            (
+                timezone.localdate(ahora, zona)
+                - timezone.localdate(self.fecha_devolucion_comprometida, zona)
+            ).days,
+        )
 
 
 class DetallePrestamo(models.Model):
