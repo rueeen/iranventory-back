@@ -452,3 +452,55 @@ def test_openapi_documenta_formatos(cliente):
     assert set(parametro["schema"]["enum"]) == {"json", "docx", "pdf"}
     assert "application/pdf" in operacion["responses"]["200"]["content"]
     assert "/api/documentos/capacidades/" in res.data["paths"]
+
+
+@pytest.mark.parametrize("cantidad", [27, 30])
+def test_plan_normaliza_solo_filas_con_datos(cliente, unidad, cantidad):
+    for indice in range(cantidad):
+        baker.make(PlanMantencion, unidad=unidad, actividad=f"Actividad {indice}")
+    res = cliente.get("/api/planes-mantencion/exportar/")
+    assert res.status_code == 200
+    libro = load_workbook(BytesIO(res.content))
+    plantilla = load_workbook(ruta_plantilla("plan_mantencion.xlsx"))
+    hoja, base = libro.active, plantilla.active
+    for fila in range(6, 6 + cantidad):
+        assert hoja.row_dimensions[fila].height == 30
+        assert hoja.cell(fila, 1).value.count("\n") == 1
+        for columna in range(1, 9):
+            celda = hoja.cell(fila, columna)
+            assert celda.alignment.wrap_text is True
+            assert celda.alignment.vertical == "center"
+            assert (
+                celda.alignment.horizontal == base.cell(6, columna).alignment.horizontal
+            )
+            assert copy(celda.border) == copy(base.cell(6, columna).border)
+    for fila in range(6 + cantidad, 41):
+        assert hoja.row_dimensions[fila].height == base.row_dimensions[fila].height
+        for columna in range(1, 9):
+            assert hoja.cell(fila, columna)._style == base.cell(fila, columna)._style
+            assert hoja.cell(fila, columna).value == base.cell(fila, columna).value
+    libro.close()
+    plantilla.close()
+    resumen = importar_plan(BytesIO(res.content), simular=False)
+    assert resumen.planes_creados == 0
+    assert resumen.planes_actualizados == cantidad
+    assert resumen.advertencias == []
+
+
+def test_plan_ajusta_alto_por_texto_y_no_lo_propaga(cliente, unidad):
+    larga = baker.make(
+        Unidad,
+        tipo_equipo=baker.make(TipoEquipo, especificacion="A" * 400),
+        codigo_activo="UTC000999998",
+        codigo_peoplesoft="180000999998",
+    )
+    baker.make(PlanMantencion, unidad=larga, actividad="Actividad larga")
+    baker.make(PlanMantencion, unidad=unidad, actividad="Actividad corta")
+    res = cliente.get("/api/planes-mantencion/exportar/")
+    assert res.status_code == 200
+    libro = load_workbook(BytesIO(res.content))
+    hoja = libro.active
+    assert hoja["C6"].value == "A" * 400
+    assert 30 < hoja.row_dimensions[6].height <= 120
+    assert hoja.row_dimensions[7].height == 30
+    libro.close()
